@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Fritz!Box Smart Home icon: stylised house with Wi-Fi signal -->
+  <!-- Background circle -->
+  <circle cx="32" cy="32" r="30" fill="#0077b6" opacity="0.9"/>
+  <!-- House body -->
+  <rect x="18" y="33" width="28" height="18" rx="2" fill="white"/>
+  <!-- Roof -->
+  <polygon points="12,34 32,14 52,34" fill="white"/>
+  <!-- Door -->
+  <rect x="27" y="42" width="10" height="9" rx="1" fill="#0077b6"/>
+  <!-- Wi-Fi arc (small, above house, indicating connectivity) -->
+  <path d="M26,29 Q32,23 38,29" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round"/>
+  <path d="M22,25 Q32,16 42,25" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" opacity="0.6"/>
+  <!-- Signal dot -->
+  <circle cx="32" cy="31.5" r="1.8" fill="white"/>
+</svg>

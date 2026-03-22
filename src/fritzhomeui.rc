@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE gui SYSTEM "kpartgui.dtd">
+<gui name="fritzhome" version="1">
+  <MenuBar>
+    <Menu name="file"><text>&amp;File</text>
+      <Action name="file_connect"/>
+      <Action name="file_refresh"/>
+      <Separator/>
+      <Action name="file_quit"/>
+    </Menu>
+  </MenuBar>
+</gui>

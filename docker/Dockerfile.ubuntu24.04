@@ -1,0 +1,45 @@
+# Build image for Ubuntu 24.04 LTS (Noble) — Qt6, NO KDE Frameworks, DEB packaging
+FROM ubuntu:24.04
+
+LABEL org.opencontainers.image.title="fritzhome-builder-ubuntu24.04"
+LABEL org.opencontainers.image.description="Build environment for fritzhome on Ubuntu 24.04 LTS (Qt6, no KDE Frameworks)"
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Base build tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        cmake \
+        ninja-build \
+        g++ \
+        make \
+        git \
+        pkg-config \
+        gzip \
+        tar \
+    && rm -rf /var/lib/apt/lists/*
+
+# Qt6 development libraries
+# On Ubuntu 24.04, qt6-base-dev includes Network, Xml, DBus modules.
+# Charts and NetworkAuth are in separate packages.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        qt6-base-dev \
+        qt6-base-private-dev \
+        qt6-charts-dev \
+        qt6-networkauth-dev \
+        qt6-tools-dev \
+        qt6-tools-dev-tools \
+    && rm -rf /var/lib/apt/lists/*
+
+# Secret Service (libsecret) — secure credential storage without KDE
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libsecret-1-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# DEB packaging tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        dpkg-dev \
+        fakeroot \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /build && chmod 777 /build
+WORKDIR /src

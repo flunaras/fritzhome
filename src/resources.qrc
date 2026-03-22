@@ -1,0 +1,16 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+    <qresource prefix="/icons">
+        <file alias="fritzhome.svg">../data/fritzhome.svg</file>
+        <file alias="device-group.svg">../data/icons/device-group.svg</file>
+        <file alias="device-color-bulb.svg">../data/icons/device-color-bulb.svg</file>
+        <file alias="device-dimmer.svg">../data/icons/device-dimmer.svg</file>
+        <file alias="device-smart-plug.svg">../data/icons/device-smart-plug.svg</file>
+        <file alias="device-switch.svg">../data/icons/device-switch.svg</file>
+        <file alias="device-thermostat.svg">../data/icons/device-thermostat.svg</file>
+        <file alias="device-blind.svg">../data/icons/device-blind.svg</file>
+        <file alias="device-alarm.svg">../data/icons/device-alarm.svg</file>
+        <file alias="device-humidity.svg">../data/icons/device-humidity.svg</file>
+        <file alias="device-sensor.svg">../data/icons/device-sensor.svg</file>
+    </qresource>
+</RCC>

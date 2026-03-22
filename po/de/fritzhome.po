@@ -1,0 +1,614 @@
+# German translations for fritzhome.
+# Copyright (C) 2026 Ulf Saran
+# This file is distributed under the same license as the fritzhome package.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: fritzhome 1.0.0\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-03-22 00:00+0000\n"
+"PO-Revision-Date: 2026-03-22 00:00+0000\n"
+"Last-Translator: Ulf Saran\n"
+"Language-Team: German\n"
+"Language: de\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+# ── Application / About ───────────────────────────────────────────────────────
+msgid "Fritz!Box Smart Home"
+msgstr "Fritz!Box Smart Home"
+
+msgid "Fritz!Home"
+msgstr "Fritz!Home"
+
+msgid "Fritz!Box Smart Home manager for KDE Plasma"
+msgstr "KDE-Plasma Smart-Home-Verwaltung für die Fritz!Box"
+
+msgid "© 2026 Ulf Saran"
+msgstr "© 2026 Ulf Saran"
+
+msgid "Ulf Saran"
+msgstr "Ulf Saran"
+
+msgid "Fritz!Box Smart Home Manager"
+msgstr "Fritz!Box Smart Home Manager"
+
+# ── Command-line options ──────────────────────────────────────────────────────
+msgid "Fritz!Box hostname or IP address (default: fritz.box)"
+msgstr "Hostname oder IP-Adresse der Fritz!Box (Standard: fritz.box)"
+
+msgid "Fritz!Box username (leave blank for the default admin account)"
+msgstr "Benutzername der Fritz!Box (leer lassen für das Standard-Admin-Konto)"
+
+msgid "Fritz!Box password"
+msgstr "Passwort der Fritz!Box"
+
+msgid "Polling interval in seconds (default: 10)"
+msgstr "Abfrageintervall in Sekunden (Standard: 10)"
+
+# ── Main window — toolbar / menus ─────────────────────────────────────────────
+msgid "&File"
+msgstr "&Datei"
+
+msgid "&Connect…"
+msgstr "&Verbinden …"
+
+msgid "&Refresh"
+msgstr "&Aktualisieren"
+
+msgid "&Quit"
+msgstr "&Beenden"
+
+# ── Main window — sidebar / status bar ───────────────────────────────────────
+msgid "Refresh interval:"
+msgstr "Aktualisierungsintervall:"
+
+msgid " s"
+msgstr " s"
+
+msgid "How often to refresh device states (2–300 seconds)"
+msgstr "Wie oft die Gerätezustände aktualisiert werden (2–300 Sekunden)"
+
+msgid "Select a device from the list."
+msgstr "Bitte wählen Sie ein Gerät aus der Liste aus."
+
+# ── Connection status strings ─────────────────────────────────────────────────
+msgid "Not connected"
+msgstr "Nicht verbunden"
+
+msgid "Connecting to %1…"
+msgstr "Verbinde mit %1 …"
+
+msgid "Connected to %1"
+msgstr "Verbunden mit %1"
+
+msgid "Connected to %1 — %2 device(s)"
+msgstr "Verbunden mit %1 – %2 Gerät(e)"
+
+msgid "Session expired — reconnecting to %1…"
+msgstr "Sitzung abgelaufen – Verbinde neu mit %1 …"
+
+# ── Login / error dialogs ─────────────────────────────────────────────────────
+msgid "Login Failed"
+msgstr "Anmeldung fehlgeschlagen"
+
+msgid "Login failed: %1"
+msgstr "Anmeldung fehlgeschlagen: %1"
+
+msgid "Could not log in to Fritz!Box:\n%1\n\nPlease check your credentials."
+msgstr "Anmeldung an der Fritz!Box fehlgeschlagen:\n%1\n\nBitte überprüfen Sie Ihre Zugangsdaten."
+
+msgid "Network error: %1"
+msgstr "Netzwerkfehler: %1"
+
+msgid "Command failed for %1: %2"
+msgstr "Befehl für %1 fehlgeschlagen: %2"
+
+# ── TLS errors ────────────────────────────────────────────────────────────────
+msgid "TLS Certificate Error"
+msgstr "TLS-Zertifikatsfehler"
+
+msgid "TLS error — see dialog for details"
+msgstr "TLS-Fehler – Details im Dialog"
+
+msgid "If your Fritz!Box uses a self-signed certificate you can enable\n\"Ignore TLS certificate warnings\" in the connection dialog."
+msgstr ""
+"Falls Ihre Fritz!Box ein selbstsigniertes Zertifikat verwendet, koennen Sie\n"
+"\"TLS-Zertifikatswarnungen ignorieren\" im Verbindungsdialog aktivieren."
+
+msgid "A TLS/SSL certificate error occurred while connecting to %1:\n\n%2\n\n%3"
+msgstr ""
+"Beim Verbinden mit %1 ist ein TLS/SSL-Zertifikatsfehler aufgetreten:\n"
+"\n"
+"%2\n"
+"\n"
+"%3"
+
+# ── Device tree column headers ────────────────────────────────────────────────
+msgid "Name"
+msgstr "Name"
+
+msgid "Type"
+msgstr "Typ"
+
+msgid "Status"
+msgstr "Status"
+
+msgid "Temperature"
+msgstr "Temperatur"
+
+msgid "Power"
+msgstr "Leistung"
+
+msgid "Availability"
+msgstr "Verfügbarkeit"
+
+# ── Device type group labels ──────────────────────────────────────────────────
+msgid "Groups"
+msgstr "Gruppen"
+
+msgid "Color Bulbs"
+msgstr "Farblampen"
+
+msgid "Dimmers"
+msgstr "Dimmer"
+
+msgid "Smart Plugs"
+msgstr "Steckdosen"
+
+msgid "Switches"
+msgstr "Schalter"
+
+msgid "Thermostats"
+msgstr "Heizkörperregler"
+
+msgid "Blinds"
+msgstr "Rollläden"
+
+msgid "Alarms"
+msgstr "Alarme"
+
+msgid "Humidity Sensors"
+msgstr "Feuchtesensoren"
+
+msgid "Sensors"
+msgstr "Sensoren"
+
+# ── Generic device status values ──────────────────────────────────────────────
+msgid "Active"
+msgstr "Aktiv"
+
+msgid "ALARM"
+msgstr "ALARM"
+
+msgid "Online"
+msgstr "Online"
+
+msgid "Offline"
+msgstr "Offline"
+
+msgid "On"
+msgstr "Ein"
+
+msgid "Off"
+msgstr "Aus"
+
+msgid "Comfort"
+msgstr "Komfort"
+
+msgid "On (Comfort)"
+msgstr "Ein (Komfort)"
+
+msgid "n/a"
+msgstr "k. A."
+
+# ── Switch widget ─────────────────────────────────────────────────────────────
+msgid "Switch Control"
+msgstr "Schaltsteuerung"
+
+msgid "Status: Unknown"
+msgstr "Status: Unbekannt"
+
+msgid "Turn On"
+msgstr "Einschalten"
+
+msgid "Turn Off"
+msgstr "Ausschalten"
+
+msgid "Toggle"
+msgstr "Umschalten"
+
+msgid "ON"
+msgstr "EIN"
+
+msgid "OFF"
+msgstr "AUS"
+
+msgid "PARTIAL"
+msgstr "TEILWEISE"
+
+msgid "Locked via Fritz!Box UI. "
+msgstr "Über Fritz!Box-Oberfläche gesperrt. "
+
+msgid "Locked on device."
+msgstr "Am Gerät gesperrt."
+
+msgid "Members have different states — use the menu to toggle individually."
+msgstr "Mitglieder haben unterschiedliche Zustände – Menü zum Einzelschalten verwenden."
+
+# ── Thermostat widget ─────────────────────────────────────────────────────────
+msgid "Current Readings"
+msgstr "Aktuelle Messwerte"
+
+msgid "Current Temp:"
+msgstr "Aktuelle Temp.:"
+
+msgid "Battery:"
+msgstr "Batterie:"
+
+msgid "Window:"
+msgstr "Fenster:"
+
+msgid "Comfort Temp:"
+msgstr "Komforttemperatur:"
+
+msgid "Eco Temp:"
+msgstr "Absenktemperatur:"
+
+msgid "Set Target Temperature"
+msgstr "Solltemperatur einstellen"
+
+msgid "Target: --"
+msgstr "Soll: --"
+
+msgid "Set"
+msgstr "Einstellen"
+
+msgid "Target: Off"
+msgstr "Soll: Aus"
+
+msgid "Target: On (Comfort)"
+msgstr "Soll: Komfort"
+
+msgid "Target: %1 °C"
+msgstr "Soll: %1 °C"
+
+msgid "Open (heating paused)"
+msgstr "Offen (Heizung pausiert)"
+
+msgid "Closed"
+msgstr "Geschlossen"
+
+# ── Energy meter widget ───────────────────────────────────────────────────────
+msgid "Energy Meter"
+msgstr "Energiemessgerät"
+
+msgid "Current Power:"
+msgstr "Aktuelle Leistung:"
+
+msgid "Total Energy:"
+msgstr "Gesamtenergie:"
+
+msgid "Voltage:"
+msgstr "Spannung:"
+
+# ── Dimmer widget ─────────────────────────────────────────────────────────────
+msgid "Dimmer Control"
+msgstr "Dimmersteuerung"
+
+msgid "Level: --"
+msgstr "Stufe: --"
+
+msgid "Set Level"
+msgstr "Stufe einstellen"
+
+msgid "On (100%)"
+msgstr "Ein (100 %)"
+
+msgid "Off (0%)"
+msgstr "Aus (0 %)"
+
+msgid "Level: %1%"
+msgstr "Stufe: %1 %"
+
+# ── Blind widget ──────────────────────────────────────────────────────────────
+msgid "Blind / Roller Shutter"
+msgstr "Rollo / Rollladen"
+
+msgid "Status: --"
+msgstr "Status: --"
+
+msgid "Open"
+msgstr "Öffnen"
+
+msgid "Close"
+msgstr "Schließen"
+
+msgid "Stop"
+msgstr "Stopp"
+
+msgid "Opening"
+msgstr "Öffnet"
+
+msgid "Closing"
+msgstr "Schließt"
+
+msgid "Stopped"
+msgstr "Gestoppt"
+
+msgid "Status: %1"
+msgstr "Status: %1"
+
+# ── Color widget ──────────────────────────────────────────────────────────────
+msgid "Hue / Saturation"
+msgstr "Farbton / Sättigung"
+
+msgid "Color Temperature"
+msgstr "Farbtemperatur"
+
+msgid "Hue && Saturation"
+msgstr "Farbton && Sättigung"
+
+msgid "Apply Color"
+msgstr "Farbe anwenden"
+
+msgid "Hue (0-359°):"
+msgstr "Farbton (0–359°):"
+
+msgid "Saturation (0-255):"
+msgstr "Sättigung (0–255):"
+
+msgid "Apply Color Temperature"
+msgstr "Farbtemperatur anwenden"
+
+msgid "Temperature (K):"
+msgstr "Temperatur (K):"
+
+msgid "Current: Hue=%1°, Saturation=%2"
+msgstr "Aktuell: Farbton=%1°, Sättigung=%2"
+
+msgid "Current: Color Temperature=%1 K"
+msgstr "Aktuell: Farbtemperatur=%1 K"
+
+# ── Humidity sensor widget ────────────────────────────────────────────────────
+msgid "Humidity Sensor"
+msgstr "Feuchtesensor"
+
+msgid "Relative Humidity:"
+msgstr "Relative Feuchte:"
+
+msgid "Comfort Level:"
+msgstr "Komfortniveau:"
+
+msgid "Too Dry"
+msgstr "Zu trocken"
+
+msgid "Too Humid"
+msgstr "Zu feucht"
+
+msgid "Comfortable (30-70%)"
+msgstr "Angenehm (30–70 %)"
+
+# ── Alarm widget ──────────────────────────────────────────────────────────────
+msgid "Alarm Sensor"
+msgstr "Alarmsensor"
+
+msgid "Alarm State:"
+msgstr "Alarmzustand:"
+
+msgid "Last Alert:"
+msgstr "Letzter Alarm:"
+
+msgid "ALARM TRIGGERED"
+msgstr "ALARM AUSGELÖST"
+
+msgid "OK - No Alarm"
+msgstr "OK – Kein Alarm"
+
+# ── Login window ──────────────────────────────────────────────────────────────
+msgid "Connect to Fritz!Box"
+msgstr "Mit Fritz!Box verbinden"
+
+msgid "<b>Fritz!Box Smart Home</b><br><small>Enter your Fritz!Box connection details.</small>"
+msgstr "<b>Fritz!Box Smart Home</b><br><small>Bitte geben Sie die Verbindungsdaten Ihrer Fritz!Box ein.</small>"
+
+msgid "Connection"
+msgstr "Verbindung"
+
+msgid "e.g. 192.168.178.1 or fritz.box"
+msgstr "z. B. 192.168.178.1 oder fritz.box"
+
+msgid "Host:"
+msgstr "Host:"
+
+msgid "Ignore TLS certificate warnings"
+msgstr "TLS-Zertifikatswarnungen ignorieren"
+
+msgid ""
+"When checked, TLS/SSL certificate errors are silently ignored.\n"
+"Use this only if your Fritz!Box uses a self-signed certificate\n"
+"and you trust the network you are connected to."
+msgstr ""
+"Wenn aktiviert, werden TLS/SSL-Zertifikatsfehler stillschweigend ignoriert.\n"
+"Verwenden Sie diese Option nur, wenn Ihre Fritz!Box ein selbstsigniertes Zertifikat verwendet\n"
+"und Sie dem Netzwerk vertrauen, mit dem Sie verbunden sind."
+
+msgid "Credentials"
+msgstr "Anmeldedaten"
+
+msgid "Fritz!Box username (leave blank for default)"
+msgstr "Fritz!Box-Benutzername (leer lassen für Standardkonto)"
+
+msgid "Username:"
+msgstr "Benutzername:"
+
+msgid "Password:"
+msgstr "Passwort:"
+
+msgid "Connect automatically on startup"
+msgstr "Beim Start automatisch verbinden"
+
+msgid ""
+"When checked, the application connects immediately on next launch\n"
+"without showing this dialog."
+msgstr ""
+"Wenn aktiviert, verbindet sich die Anwendung beim nächsten Start sofort,\n"
+"ohne diesen Dialog anzuzeigen."
+
+msgid "Connect"
+msgstr "Verbinden"
+
+# ── Chart widget ──────────────────────────────────────────────────────────────
+msgid "Lock Y scale"
+msgstr "Y-Achse fixieren"
+
+msgid ""
+"When checked, the vertical axis range is frozen at its\n"
+"current scale and will not auto-adjust as new data arrives\n"
+"or the time window is scrolled."
+msgstr ""
+"Wenn aktiviert, wird der Wertebereich der Y-Achse auf die aktuelle Skalierung fixiert\n"
+"und passt sich nicht mehr automatisch an neue Daten oder\n"
+"Änderungen des Zeitfensters an."
+
+msgid "Last %1"
+msgstr "Letzte %1"
+
+msgid "Time window:"
+msgstr "Zeitfenster:"
+
+msgid "Temperature History"
+msgstr "Temperaturverlauf"
+
+msgid "Power Consumption"
+msgstr "Stromverbrauch"
+
+msgid "Humidity History"
+msgstr "Feuchtigkeitsverlauf"
+
+msgid "Energy History"
+msgstr "Energieverlauf"
+
+msgid "Time"
+msgstr "Zeit"
+
+msgid "°C"
+msgstr "°C"
+
+msgid "Watts"
+msgstr "Watt"
+
+msgid "% RH"
+msgstr "% rF"
+
+msgid "kWh"
+msgstr "kWh"
+
+msgid "Wh"
+msgstr "Wh"
+
+msgid "Target"
+msgstr "Sollwert"
+
+msgid "Power (W)"
+msgstr "Leistung (W)"
+
+msgid "Humidity (%)"
+msgstr "Feuchte (%)"
+
+msgid "Humidity"
+msgstr "Feuchte"
+
+msgid "Energy"
+msgstr "Energie"
+
+msgid "Fetching energy history…"
+msgstr "Energieverlauf wird geladen …"
+
+msgid "No chart data available for this device."
+msgstr "Für dieses Gerät sind keine Diagrammdaten verfügbar."
+
+msgid "Info"
+msgstr "Info"
+
+msgid "No energy history available from Fritz!Box."
+msgstr "Keine Energieverlaufsdaten von der Fritz!Box verfügbar."
+
+msgid "Total Energy Consumed"
+msgstr "Gesamtenergieverbrauch"
+
+msgid "Current Power"
+msgstr "Aktuelle Leistung"
+
+msgid "Voltage"
+msgstr "Spannung"
+
+msgid "No energy data available"
+msgstr "Keine Energiedaten verfügbar"
+
+msgid "View:"
+msgstr "Ansicht:"
+
+msgid "Last 24 hours"
+msgstr "Letzte 24 Stunden"
+
+msgid "Rolling month"
+msgstr "Rollierender Monat"
+
+msgid "Last 2 years"
+msgstr "Letzte 2 Jahre"
+
+# ── Fritz!Box API error messages ──────────────────────────────────────────────
+msgid "No host configured"
+msgstr "Kein Host konfiguriert"
+
+msgid "Empty challenge from Fritz!Box"
+msgstr "Leere Challenge von der Fritz!Box empfangen"
+
+msgid "Login failed."
+msgstr "Anmeldung fehlgeschlagen."
+
+msgid " Fritz!Box is blocking login for %1 seconds."
+msgstr " Fritz!Box blockiert die Anmeldung für %1 Sekunden."
+
+msgid "Session expired and automatic re-login failed %1 time(s). Please check your credentials."
+msgstr "Sitzung abgelaufen und automatische Neuanmeldung ist %1-mal fehlgeschlagen. Bitte überprüfen Sie Ihre Zugangsdaten."
+
+# ── Abbreviated month names (energy history chart axis labels) ────────────────
+msgid "Jan"
+msgstr "Jan"
+
+msgid "Feb"
+msgstr "Feb"
+
+msgid "Mar"
+msgstr "Mär"
+
+msgid "Apr"
+msgstr "Apr"
+
+msgid "May"
+msgstr "Mai"
+
+msgid "Jun"
+msgstr "Jun"
+
+msgid "Jul"
+msgstr "Jul"
+
+msgid "Aug"
+msgstr "Aug"
+
+msgid "Sep"
+msgstr "Sep"
+
+msgid "Oct"
+msgstr "Okt"
+
+msgid "Nov"
+msgstr "Nov"
+
+msgid "Dec"
+msgstr "Dez"

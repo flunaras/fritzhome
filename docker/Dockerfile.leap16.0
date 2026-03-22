@@ -1,0 +1,64 @@
+# Build image for openSUSE Leap 16.0 — Qt6 + KDE Frameworks 6
+#
+# Qt6 devel packages come from the standard OSS repo (qt6 naming).
+# KDE Frameworks 6 and extra-cmake-modules (ECM) are NOT in the standard
+# Leap 16.0 repo; they require the KDE:Extra OBS repository.
+#
+# Package naming conventions on openSUSE Leap 16.0:
+#   Qt6 devel:    qt6-<name>-devel              (standard OSS repo)
+#   ECM:          extra-cmake-modules           (KDE:Extra OBS repo)
+#   KF6 devel:    kf6-k<name>-devel             (KDE:Extra OBS repo)
+
+FROM opensuse/leap:16.0
+
+LABEL org.opencontainers.image.title="fritzhome-builder-leap16.0"
+LABEL org.opencontainers.image.description="Build environment for fritzhome on openSUSE Leap 16.0 (Qt6/KF6)"
+
+# ── Add KDE:Extra OBS repository ──────────────────────────────────────────────
+# Qt6 itself comes from the standard OSS repo; only KF6/ECM needs KDE:Extra.
+RUN zypper --non-interactive addrepo --refresh --priority 90 \
+        https://download.opensuse.org/repositories/KDE:/Extra/openSUSE_Leap_16.0/KDE:Extra.repo \
+    && zypper --non-interactive --gpg-auto-import-keys refresh
+
+# ── Base build tools ──────────────────────────────────────────────────────────
+RUN zypper --non-interactive install --no-recommends \
+        cmake \
+        ninja \
+        gcc-c++ \
+        make \
+        git \
+        pkg-config \
+        gzip \
+        tar \
+        which
+
+# ── Qt6 development libraries (standard OSS repo, Qt 6.9.x) ──────────────────
+RUN zypper --non-interactive install --no-recommends \
+        qt6-base-devel \
+        qt6-base-private-devel \
+        qt6-network-devel \
+        qt6-networkauth-devel \
+        qt6-xml-devel \
+        qt6-dbus-devel \
+        qt6-charts-devel \
+        qt6-tools-devel
+
+# ── extra-cmake-modules + KDE Frameworks 6 devel (KDE:Extra repo) ─────────────
+RUN zypper --non-interactive install --no-recommends \
+        extra-cmake-modules \
+        kf6-kcoreaddons-devel \
+        kf6-kwidgetsaddons-devel \
+        kf6-kxmlgui-devel \
+        kf6-ki18n-devel \
+        kf6-kstatusnotifieritem-devel \
+        kf6-knotifications-devel \
+        kf6-kwallet-devel
+
+# ── RPM packaging tools ───────────────────────────────────────────────────────
+RUN zypper --non-interactive install --no-recommends \
+        rpm-build
+
+# ── Ensure the build directory exists and is writable ─────────────────────────
+RUN mkdir -p /build && chmod 777 /build
+
+WORKDIR /src

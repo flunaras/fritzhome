@@ -1,0 +1,58 @@
+# Build image for openSUSE Tumbleweed — Qt6 + KDE Frameworks 6
+#
+# All packages come from the standard Tumbleweed OSS repo; no extra OBS
+# repositories are needed.  ECM is packaged as kf6-extra-cmake-modules
+# (same name as on Leap 16.0).
+#
+# Package naming on Tumbleweed:
+#   Qt6 devel:  qt6-<name>-devel
+#   ECM:        kf6-extra-cmake-modules
+#   KF6 devel:  kf6-k<name>-devel
+
+FROM opensuse/tumbleweed:latest
+
+LABEL org.opencontainers.image.title="fritzhome-builder-tumbleweed"
+LABEL org.opencontainers.image.description="Build environment for fritzhome on openSUSE Tumbleweed (Qt6/KF6)"
+
+# ── Base build tools ──────────────────────────────────────────────────────────
+RUN zypper --non-interactive install --no-recommends \
+        cmake \
+        ninja \
+        gcc-c++ \
+        make \
+        git \
+        pkg-config \
+        gzip \
+        tar \
+        which
+
+# ── Qt6 development libraries ─────────────────────────────────────────────────
+RUN zypper --non-interactive install --no-recommends \
+        qt6-base-devel \
+        qt6-base-private-devel \
+        qt6-network-devel \
+        qt6-networkauth-devel \
+        qt6-xml-devel \
+        qt6-dbus-devel \
+        qt6-charts-devel \
+        qt6-tools-devel
+
+# ── extra-cmake-modules + KDE Frameworks 6 devel ──────────────────────────────
+RUN zypper --non-interactive install --no-recommends \
+        kf6-extra-cmake-modules \
+        kf6-kcoreaddons-devel \
+        kf6-kwidgetsaddons-devel \
+        kf6-kxmlgui-devel \
+        kf6-ki18n-devel \
+        kf6-kstatusnotifieritem-devel \
+        kf6-knotifications-devel \
+        kf6-kwallet-devel
+
+# ── RPM packaging tools ───────────────────────────────────────────────────────
+RUN zypper --non-interactive install --no-recommends \
+        rpm-build
+
+# ── Ensure the build directory exists and is writable ─────────────────────────
+RUN mkdir -p /build && chmod 777 /build
+
+WORKDIR /src

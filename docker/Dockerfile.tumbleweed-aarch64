@@ -1,0 +1,209 @@
+# Build image for openSUSE Tumbleweed — cross-compilation for aarch64
+#
+# Strategy: x86_64 container with the aarch64-suse-linux GCC14 cross-compiler
+# from the standard Tumbleweed OSS repo, plus an aarch64 sysroot built by
+# downloading and extracting aarch64 RPMs from the openSUSE ports mirror.
+#
+# No QEMU / binfmt_misc required on the host.
+#
+# Cross-compiler binary prefix: aarch64-suse-linux-
+# Sysroot location inside container: /usr/aarch64-suse-linux/sys-root
+#   (the gcc-provided glibc sysroot; Qt6+KF6 content is merged into it)
+# CMake toolchain file: /src/cmake/toolchain-aarch64.cmake
+
+FROM opensuse/tumbleweed:latest
+
+LABEL org.opencontainers.image.title="fritzhome-builder-tumbleweed-aarch64"
+LABEL org.opencontainers.image.description="Cross-build environment for fritzhome on openSUSE Tumbleweed (Qt6/KF6, target aarch64)"
+
+# ── Base build tools (x86_64 host tools) ─────────────────────────────────────
+RUN zypper --non-interactive install --no-recommends \
+        cmake \
+        ninja \
+        make \
+        git \
+        pkg-config \
+        gzip \
+        tar \
+        which \
+        curl \
+        cpio \
+        rpm-build \
+        qt6-qml-devel \
+        kf6-kconfig \
+        kf6-kconfig-devel
+
+# ── aarch64 cross-compiler (runs on x86_64, targets aarch64-suse-linux) ──────
+# Pulls in: cross-aarch64-binutils, cross-aarch64-glibc-devel,
+#           cross-aarch64-linux-glibc-devel (Linux headers for aarch64 userspace)
+RUN zypper --non-interactive install --no-recommends \
+        cross-aarch64-gcc14 \
+        cross-aarch64-binutils
+
+# ── Build the aarch64 sysroot ─────────────────────────────────────────────────
+# The cross-aarch64-gcc14 package already ships a minimal glibc sysroot at
+# /usr/aarch64-suse-linux/sys-root (crt1.o, libc, libgcc_s …).
+# We download aarch64 RPMs from the openSUSE ports mirror and extract them
+# into that same sysroot with rpm2cpio.  This adds the Qt6 + KF6 headers and
+# .so symlinks needed by CMake / the linker during cross-compilation.
+#
+# The ports mirror layout:
+#   aarch64 binaries: https://download.opensuse.org/ports/aarch64/tumbleweed/repo/oss/aarch64/
+#   noarch packages:  https://download.opensuse.org/ports/aarch64/tumbleweed/repo/oss/noarch/
+#
+# We use --nodeps / --noscripts (via rpm2cpio extraction) because we are
+# building a sysroot, not a bootable system.
+
+ENV SYSROOT=/usr/aarch64-suse-linux/sys-root
+ENV PORTS_BASE=https://download.opensuse.org/ports/aarch64/tumbleweed/repo/oss
+
+# ── Group 1: Qt6 base runtime libs + devel (Core, Gui, Widgets, DBus, Network, Xml, Qml) ──
+RUN set -euo pipefail; \
+    cd /tmp; \
+    for pkg in \
+        libQt6Core6 \
+        libQt6Gui6 \
+        libQt6Widgets6 \
+        libQt6DBus6 \
+        libQt6Network6 \
+        libQt6Xml6 \
+        libQt6Concurrent6 \
+        libQt6OpenGL6 \
+        libQt6OpenGLWidgets6 \
+        libQt6Qml6 \
+        libQt6PrintSupport6 \
+        qt6-base-common-devel \
+        qt6-core-devel \
+        qt6-gui-devel \
+        qt6-widgets-devel \
+        qt6-opengl-devel \
+        qt6-openglwidgets-devel \
+        qt6-concurrent-devel \
+        qt6-dbus-devel \
+        qt6-network-devel \
+        qt6-xml-devel \
+        qt6-printsupport-devel \
+        qt6-qml-devel \
+    ; do \
+        url=$(curl -sL "${PORTS_BASE}/aarch64/" | grep -oP "href=\"\K\./${pkg}-[^\"]+\.aarch64\.rpm" | head -1 | sed 's|^\./||'); \
+        echo "Fetching: ${PORTS_BASE}/aarch64/${url}"; \
+        curl -fsSL "${PORTS_BASE}/aarch64/${url}" -o pkg.rpm; \
+        rpm2cpio pkg.rpm | cpio -idmv --quiet 2>/dev/null; \
+        rm -f pkg.rpm; \
+    done; \
+    cp -a --no-preserve=ownership /tmp/usr/. "${SYSROOT}/usr/"; \
+    rm -rf /tmp/usr
+
+# ── Group 2: Qt6 NetworkAuth, Charts, Tools (runtime + devel) ────────────────
+RUN set -euo pipefail; \
+    cd /tmp; \
+    for pkg in \
+        libQt6Charts6 \
+        libQt6NetworkAuth6 \
+        qt6-networkauth-devel \
+        qt6-charts-devel \
+        qt6-tools-devel \
+    ; do \
+        url=$(curl -sL "${PORTS_BASE}/aarch64/" | grep -oP "href=\"\K\./${pkg}-[^\"]+\.aarch64\.rpm" | head -1 | sed 's|^\./||'); \
+        echo "Fetching: ${PORTS_BASE}/aarch64/${url}"; \
+        curl -fsSL "${PORTS_BASE}/aarch64/${url}" -o pkg.rpm; \
+        rpm2cpio pkg.rpm | cpio -idmv --quiet 2>/dev/null; \
+        rm -f pkg.rpm; \
+    done; \
+    cp -a --no-preserve=ownership /tmp/usr/. "${SYSROOT}/usr/"; \
+    rm -rf /tmp/usr
+
+# ── Group 3: KDE Frameworks 6 ECM + runtime libs + devel packages ────────────
+RUN set -euo pipefail; \
+    cd /tmp; \
+    # ECM is noarch \
+    pkg=kf6-extra-cmake-modules; \
+    url=$(curl -sL "${PORTS_BASE}/noarch/" | grep -oP "href=\"\K\./${pkg}-[^\"]+\.noarch\.rpm" | head -1 | sed 's|^\./||'); \
+    echo "Fetching: ${PORTS_BASE}/noarch/${url}"; \
+    curl -fsSL "${PORTS_BASE}/noarch/${url}" -o pkg.rpm; \
+    rpm2cpio pkg.rpm | cpio -idmv --quiet 2>/dev/null; \
+    rm -f pkg.rpm; \
+    for pkg in \
+        libKF6CoreAddons6 \
+        libKF6WidgetsAddons6 \
+        libKF6XmlGui6 \
+        libKF6I18n6 \
+        libKF6StatusNotifierItem6 \
+        libKF6Notifications6 \
+        libKF6Wallet6 \
+        libKF6ConfigCore6 \
+        libKF6ConfigGui6 \
+        libKF6ConfigWidgets6 \
+        libKF6ConfigQml6 \
+        libKF6ColorScheme6 \
+        libKF6Completion6 \
+        libKF6GuiAddons6 \
+        libKF6JobWidgets6 \
+        libKF6WindowSystem6 \
+        libKF6ItemViews6 \
+        libKF6IconThemes6 \
+        libKF6IconWidgets6 \
+        libKF6GlobalAccel6 \
+        libKF6Codecs6 \
+        kf6-kcoreaddons-devel \
+        kf6-kwidgetsaddons-devel \
+        kf6-kxmlgui-devel \
+        kf6-ki18n-devel \
+        kf6-kstatusnotifieritem-devel \
+        kf6-knotifications-devel \
+        kf6-kwallet-devel \
+        kf6-kconfig-devel \
+        kf6-kconfigwidgets-devel \
+        kf6-kwindowsystem-devel \
+        kf6-kitemviews-devel \
+        kf6-kiconthemes-devel \
+        kf6-kglobalaccel-devel \
+        kf6-kcodecs-devel \
+        kf6-kguiaddons-devel \
+        kf6-kcolorscheme-devel \
+        kf6-kcompletion-devel \
+        kf6-kjobwidgets-devel \
+    ; do \
+        url=$(curl -sL "${PORTS_BASE}/aarch64/" | grep -oP "href=\"\K\./${pkg}-[^\"]+\.aarch64\.rpm" | head -1 | sed 's|^\./||'); \
+        echo "Fetching: ${PORTS_BASE}/aarch64/${url}"; \
+        curl -fsSL "${PORTS_BASE}/aarch64/${url}" -o pkg.rpm; \
+        rpm2cpio pkg.rpm | cpio -idmv --quiet 2>/dev/null; \
+        rm -f pkg.rpm; \
+    done; \
+    cp -a --no-preserve=ownership /tmp/usr/. "${SYSROOT}/usr/"; \
+    rm -rf /tmp/usr
+
+# ── Group 4: EGL / GLES / GL headers (needed by Qt6Gui) ──────────────────────
+# Qt6Gui's CMake config checks for EGL and GLESv2 as dependencies.
+# We need the Mesa/glvnd devel headers in the sysroot so cmake can find them.
+RUN set -euo pipefail; \
+    cd /tmp; \
+    for pkg in \
+        Mesa-libEGL1 \
+        Mesa-libEGL-devel \
+        Mesa-libGL1 \
+        Mesa-libGL-devel \
+        Mesa-libGLESv2-devel \
+        Mesa-KHR-devel \
+        libglvnd \
+        libglvnd-devel \
+    ; do \
+        url=$(curl -sL "${PORTS_BASE}/aarch64/" | grep -oP "href=\"\K\./${pkg}-[^\"]+\.aarch64\.rpm" | head -1 | sed 's|^\./||'); \
+        echo "Fetching: ${PORTS_BASE}/aarch64/${url}"; \
+        curl -fsSL "${PORTS_BASE}/aarch64/${url}" -o pkg.rpm; \
+        rpm2cpio pkg.rpm | cpio -idmv --quiet 2>/dev/null; \
+        rm -f pkg.rpm; \
+    done; \
+    cp -a --no-preserve=ownership /tmp/usr/. "${SYSROOT}/usr/"; \
+    rm -rf /tmp/usr
+
+# ── Fix cmake config paths inside the sysroot ────────────────────────────────
+# Qt6 and KF6 CMake config files embed absolute paths that point to /usr on the
+# target system.  When cross-compiling we set CMAKE_FIND_ROOT_PATH to SYSROOT,
+# so CMake will prepend the sysroot and find them correctly.
+# We do NOT need to patch the .cmake files — CMake's sysroot handling does it.
+
+# ── Ensure the build directory exists and is writable ─────────────────────────
+RUN mkdir -p /build && chmod 777 /build
+
+WORKDIR /src

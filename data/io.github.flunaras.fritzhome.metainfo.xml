@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.flunaras.fritzhome</id>
+  <name>Fritz!Home</name>
+  <summary>KDE Plasma application for AVM Fritz!Box Smart Home</summary>
+  <description>
+    <p>
+      Fritz!Home is a KDE Plasma application for monitoring and controlling
+      AVM Fritz!Box Smart Home devices over your local network. It integrates
+      natively into the KDE desktop using KWallet and KI18n.
+    </p>
+    <p>It supports the following device types:</p>
+    <ul>
+      <li>Smart plugs and switchable outlets with energy metering</li>
+      <li>Radiator controllers (HKR) with temperature and schedule management</li>
+      <li>Dimmable bulbs and LED strips</li>
+      <li>RGBW colour bulbs with hue, saturation, and colour-temperature control</li>
+      <li>Roller blinds and jalousies</li>
+      <li>Humidity sensors</li>
+      <li>Door and window alarm sensors</li>
+    </ul>
+    <p>
+      The application communicates directly with the Fritz!Box router using
+      AVM's documented AHA (AVM Home Automation) HTTP interface — no cloud
+      account, no internet connection required.
+    </p>
+  </description>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+    <url type="homepage">https://github.com/flunaras/fritzhome</url>
+  <categories>
+    <category>Qt</category>
+    <category>KDE</category>
+    <category>Network</category>
+    <category>Utility</category>
+  </categories>
+  <keywords>
+    <keyword>fritzbox</keyword>
+    <keyword>smart home</keyword>
+    <keyword>AVM</keyword>
+    <keyword>DECT</keyword>
+    <keyword>home automation</keyword>
+    <keyword>KDE</keyword>
+    <keyword>Plasma</keyword>
+  </keywords>
+  <releases>
+    <release version="1.0.0" date="2026-03-22">
+      <description>
+        <p>Initial release.</p>
+      </description>
+    </release>
+  </releases>
+  <content_rating type="oars-1.1"/>
+</component>

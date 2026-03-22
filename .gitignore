@@ -1,0 +1,43 @@
+# ── Build directories ─────────────────────────────────────────────────────────
+build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+CPackConfig.cmake
+CPackSourceConfig.cmake
+install_manifest.txt
+_CPack_Packages/
+
+# ── Build output (binaries + packages) ────────────────────────────────────────
+out/
+
+# ── Compiled Qt/KDE translation artefacts ────────────────────────────────────
+*.qm
+*.mo
+
+# ── Qt build system generated files ──────────────────────────────────────────
+fritzhome_autogen/
+*.rcc/
+moc_*.cpp
+qrc_*.cpp
+ui_*.h
+
+# ── CMake generated ───────────────────────────────────────────────────────────
+*.cmake
+!cmake/toolchain-aarch64.cmake
+
+# ── Package files ─────────────────────────────────────────────────────────────
+*.rpm
+*.deb
+*.tar.gz
+*.tar.bz2
+*.zip
+
+# ── Editor / IDE ──────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store

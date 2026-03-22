@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Fritz!Home
+GenericName=Smart Home Manager
+Comment=Monitor and control AVM Fritz!Box Smart Home devices
+Exec=fritzhome
+Icon=fritzhome
+Categories=Qt;KDE;Network;Utility;
+Keywords=fritz;fritzbox;smarthome;home automation;AVM;DECT;KDE;Plasma;
+StartupNotify=true
+StartupWMClass=fritzhome

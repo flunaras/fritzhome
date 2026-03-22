@@ -1,0 +1,52 @@
+# Build image for openSUSE Leap 15.6 — pure Qt5, NO KDE Frameworks, NO OBS repos
+#
+# All packages come exclusively from the standard openSUSE Leap 15.6 OSS repo.
+# KDE Frameworks 5 (and extra-cmake-modules) are NOT available there, so this
+# build uses -DUSE_KF=0 and the HAVE_KF=0 code paths throughout the source.
+#
+# Package naming on Leap 15.6:
+#   Qt5 devel:   libQt5<Name>-devel
+#   Qt5 Charts:  libQt5Charts5-devel
+#   Qt5 NetAuth: libqt5-qtnetworkauth-devel
+
+FROM opensuse/leap:15.6
+
+LABEL org.opencontainers.image.title="fritzhome-builder-leap15.6"
+LABEL org.opencontainers.image.description="Build environment for fritzhome on openSUSE Leap 15.6 (Qt5 only, no KDE Frameworks)"
+
+# ── Base build tools (standard OSS repo only) ─────────────────────────────────
+RUN zypper --non-interactive install --no-recommends \
+        cmake \
+        ninja \
+        gcc-c++ \
+        make \
+        git \
+        pkg-config \
+        gzip \
+        tar \
+        which
+
+# ── Qt5 development libraries (all from standard OSS repo) ────────────────────
+RUN zypper --non-interactive install --no-recommends \
+        libQt5Core-devel \
+        libQt5Gui-devel \
+        libQt5Widgets-devel \
+        libQt5Network-devel \
+        libQt5Xml-devel \
+        libQt5DBus-devel \
+        libQt5Charts5-devel \
+        libqt5-qtnetworkauth-devel \
+        libqt5-qttools-devel
+
+# ── Secret Service (libsecret) — secure credential storage without KDE ─────────
+RUN zypper --non-interactive install --no-recommends \
+        libsecret-devel
+
+# ── RPM packaging tools ───────────────────────────────────────────────────────
+RUN zypper --non-interactive install --no-recommends \
+        rpm-build
+
+# ── Ensure the build directory exists and is writable ─────────────────────────
+RUN mkdir -p /build && chmod 777 /build
+
+WORKDIR /src
