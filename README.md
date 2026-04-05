@@ -21,9 +21,9 @@ Communicates directly with the Fritz!Box router over the local network using the
   | Roller blinds / jalousies | Open / Close / Stop |
   | Humidity sensors | Relative humidity % |
   | Door/window alarm sensors | Triggered state, last alert timestamp |
-  | Fritz!Box device groups | Grouped display in tree; stacked per-member power chart; multi-line per-member temperature chart |
+  | Fritz!Box device groups | Grouped display in tree; stacked per-member power chart; multi-line per-member temperature chart; per-member energy pie chart |
 
-- **Live charts** (Temperature, Power, Humidity, Energy gauge, Energy history with configurable resolution; bar chart shows hover tooltips with date/value, and the most recent bar is visually dimmed to indicate an incomplete accumulation period; group devices show a **stacked energy history bar chart** with one colour-coded bar segment per member device, a **stacked per-member power chart**, and a **multi-line temperature chart** with one line per temperature-capable member)
+- **Live charts** (Temperature, Power, Humidity, Energy gauge, Energy history with configurable resolution; bar chart shows hover tooltips with date/value, and the most recent bar is visually dimmed to indicate an incomplete accumulation period; group devices show a **stacked energy history bar chart** with one colour-coded bar segment per member device, a **stacked per-member power chart**, and a **multi-line temperature chart** with one line per temperature-capable member). For groups the Energy tab also shows a **per-member pie chart** summarising each member's share of total energy; slice labels show both absolute and percentage values, with overlap-aware visibility that hides labels of small neighbouring slices; hovering a slice explodes it and shows a tooltip with its details.
 - **Configurable polling interval** (2 – 300 s), shown below the device tree
 - **Automatic login** — optional checkbox in the Connect dialog; skips the dialog on next launch if stored credentials are available
 - **Secure password storage** via KWallet (KDE) or libsecret/GNOME keyring

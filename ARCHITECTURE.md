@@ -125,7 +125,8 @@ FritzDevice
 │                        │    • Power        (QChartView + time-window    │
 │                        │                   combo overlay, top-left)     │
 │                        │    • Humidity     (QChartView)                 │
-│                        │    • Energy       (gauge labels)               │
+│                        │    • Energy       (gauge labels + optional    │
+│                        │                   per-member pie chart)       │
 │                        │    • Energy History (bar chart + resolution    │
 │                        │                     combo box)                 │
 ├────────────────────────┴────────────────────────────────────────────────┤
@@ -167,7 +168,10 @@ MainWindow  (QMainWindow)
 │           │   ├── Tab "Temperature"  → QChartView
 │           │   ├── Tab "Power"        → QChartView
 │           │   ├── Tab "Humidity"     → QChartView
-│           │   ├── Tab "Energy"       → QWidget (gauge labels)
+│           │   ├── Tab "Energy"       → QWidget (outer panel, grey background)
+│           │   │                         └── QWidget (inner, white background)
+│           │   │                              ├── QLabel (gauge labels: kWh, W, V)
+│           │   │                              └── QChartView (m_groupEnergyPieView, optional pie chart)
 │           │   └── Tab "Energy History" (index m_energyHistoryTabIndex)
 │           │       ├── QComboBox  (m_energyResCombo)
 │           │       └── QChartView
@@ -387,8 +391,25 @@ Determines panel index by device capability priority (same order as group bucket
 | Temperature (group) | QLineSeries × N members | `member.temperatureHistory` per temp-capable member (poll-rolling) | Yes |
 | Power           | QAreaSeries (single) or N×QAreaSeries layers (group ≥2 energy members) | `dev.powerHistory` / `member.powerHistory` (poll-rolling) | Yes |
 | Humidity        | QLineSeries          | `dev.humidityHistory` (poll-rolling)    | No          |
-| Energy          | Static labels only   | `dev.energyStats` (live)               | No          |
+| Energy          | Static labels + optional QPieSeries (groups only) | `dev.energyStats` (live); per-member `energyStats.energy` for pie | No          |
 | Energy History  | QBarSeries (single) or QStackedBarSeries (group) — rebuilt on resolution change | `DeviceBasicStats` per member from API | No          |
+
+Additional UI: For group devices the Energy tab shows a per-group
+"Member Energy Distribution" pie chart (`QPieSeries` in a `QChartView`) summarising
+each member's share (Wh or kWh, auto-scaled).  Slice labels always show both
+absolute and percentage values; an overlap-aware visibility system
+(`updatePieSliceLabels()`) hides labels of small neighbouring slices (angular
+proximity < 22°, keeping the larger slice's label).  When a slice is hovered it
+explodes outward (distance factor 0.10, label arm factor 0.05) and only that
+slice's label is shown; on mouse leave all non-overlapping labels are restored.
+Per-slice hover tooltips are implemented via a `PieTooltipFilter` event filter on
+the chart viewport, using angular hit-testing against the pie geometry — this avoids
+`QPieSlice::setToolTip` which is not available across all Qt versions.  The chart
+uses `QChart::ChartThemeQt` (white background) with 10 px margins; the chart view
+has a minimum height of 280 px.  The Energy tab uses a two-layer widget structure:
+an outer panel with the default system background (so the `QTabWidget` grey frame
+stays visible) containing an inner widget with a white `QPalette::Window` background
+where labels and chart reside — matching the visual style of the other chart tabs.
 
 The time-window combo box (overlaid top-left on Temperature and Power chart tabs) controls
 how much rolling history to show. It has **9 steps**: 5 min, 15 min, 30 min, 1 h, 2 h, 4 h,
@@ -557,6 +578,14 @@ vertically so the total bar height equals the sum of all member contributions.
 | `m_groupHistoryMode` | `bool` | True when the last-shown energy history was a group chart |
 | `m_lastGroupMemberStats` | `QList<QPair<QString,DeviceBasicStats>>` | Cached per-member stats, used for resolution changes |
 | `m_memberDevices` | `FritzDeviceList` | Member device objects (name lookup for bar labels) |
+
+### ChartWidget state for group energy pie chart
+
+| Member | Type | Purpose |
+|---|---|---|
+| `m_groupEnergyPie` | `QPieSeries *` | Pie series for member energy distribution; reused across rebuilds (cleared and repopulated) |
+| `m_groupEnergyPieView` | `QChartView *` | Chart view hosting the pie chart; created once and inserted into the Energy tab layout |
+| `m_groupPieTooltipFilter` | `PieTooltipFilter *` | Event filter on the chart viewport for hover tooltips and slice explode interaction |
 
 ### MainWindow state for group stats collection
 

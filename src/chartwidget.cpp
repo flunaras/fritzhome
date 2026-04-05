@@ -15,8 +15,10 @@
 #include <QToolTip>
 #include <QCursor>
 #include <QHelpEvent>
+#include <QDebug>
 #include <QMouseEvent>
 #include <QCoreApplication>
+#include <QTimer>
 #include <QMap>
 #include <QVector>
 #include <QGraphicsLineItem>
@@ -37,6 +39,8 @@
 #include <QtCharts/QBarSet>
 #include <QtCharts/QBarCategoryAxis>
 #include <QtCharts/QXYSeries>
+#include <QtCharts/QPieSeries>
+#include <QtCharts/QPieSlice>
 
 // Qt5 requires QT_CHARTS_USE_NAMESPACE to pull chart types into the global namespace.
 // Qt6 has no such macro (types are already global) — so guard it.
@@ -98,6 +102,52 @@ static QString monthAbbr(int month)
     default: return QString::number(month);
     }
 }
+
+// Forward declaration — defined below, before PieTooltipFilter.
+static void updatePieSliceLabels(QPieSeries *series, QPieSlice *explodedSlice);
+
+void ChartWidget::updateGroupPieLabels()
+{
+    if (!m_groupEnergyPie)
+        return;
+
+    // Compute total to decide on unit scaling (Wh vs kWh)
+    double totalWh = 0.0;
+    for (QPieSlice *s : m_groupEnergyPie->slices()) {
+        totalWh += s->value();
+    }
+    // Use kWh when typical absolute values exceed 1000 Wh
+    const bool useKwh = (totalWh >= 1000.0);
+    const double scale = useKwh ? 0.001 : 1.0;
+    const QString unit = useKwh ? i18n("kWh") : i18n("Wh");
+
+    // Update each slice label to include both absolute and percent values.
+    for (QPieSlice *s : m_groupEnergyPie->slices()) {
+        double val = s->value();
+        double pct = (totalWh > 0.0) ? (val / totalWh * 100.0) : 0.0;
+        const double absVal = val * scale;
+        QString name = s->property("memberName").toString();
+        if (name.isEmpty()) name = s->label();
+        // Example: "Living Room: 1.234 kWh (12.3 %)"
+        s->setLabel(QString::fromUtf8("%1: %2 %3 (%4 %)")
+                    .arg(name)
+                    .arg(absVal, 0, 'f', useKwh ? 3 : 1)
+                    .arg(unit)
+                    .arg(pct, 0, 'f', 1));
+    }
+
+    // Delegate label visibility to the shared helper: no slice is exploded
+    // at build time, so this applies the idle-mode overlap logic.
+    updatePieSliceLabels(m_groupEnergyPie, nullptr);
+}
+
+// layoutGroupPieLabelsSimple removed; hover-explode approach used instead.
+
+// Layout pie labels manually to avoid overlaps. Qt Charts places labels
+// naively and they can collide when slices are small or many. This function
+// creates QGraphicsTextItem and QGraphicsLineItem children on the chart's
+// scene and attempts a simple force-directed layout along radial lines.
+// layoutGroupPieLabels removed during rollback.
 
 // ---------------------------------------------------------------------------
 // Time-axis tick helpers
@@ -218,6 +268,286 @@ static QChartView *makeChartView(QChart *chart)
     return view;
 }
 
+// ---------------------------------------------------------------------------
+// Pie-label visibility helper
+// ---------------------------------------------------------------------------
+// Updates which pie-slice labels are visible depending on whether a slice is
+// currently exploded (hovered).
+//
+//  * If explodedSlice != nullptr  →  show ONLY that slice's label.
+//  * If explodedSlice == nullptr  →  show all labels, but hide overlapping
+//    ones, keeping the label of the larger (by value) slice in each
+//    conflicting pair.
+//
+// "Overlap" is detected by angular proximity: two labels whose slice
+// mid-angles are closer than kMinAngularSep degrees are considered
+// overlapping.  This is a heuristic — actual rendered label bounding
+// boxes are internal to Qt Charts and not accessible.
+static void updatePieSliceLabels(QPieSeries *series, QPieSlice *explodedSlice)
+{
+    if (!series)
+        return;
+    const QList<QPieSlice*> slices = series->slices();
+
+    if (explodedSlice) {
+        // ── Exploded mode: show only the exploded slice's label ──────
+        for (QPieSlice *s : slices)
+            s->setLabelVisible(s == explodedSlice);
+        return;
+    }
+
+    // ── Idle mode: show all labels, then hide overlapping smaller ones ──
+    // First make every non-zero slice label visible.
+    for (QPieSlice *s : slices)
+        s->setLabelVisible(s->angleSpan() > 0.0);
+
+    // Minimum angular separation (degrees) between mid-angles for two
+    // labels to be considered non-overlapping.  Labels whose mid-angles
+    // are closer than this will overlap; the smaller slice's label is
+    // hidden.
+    const double kMinAngularSep = 22.0;
+
+    // Build a list of (midAngle, index) for visible slices, sorted by
+    // midAngle so we can check neighbours efficiently.
+    struct SliceInfo {
+        double midAngle;
+        int    index;
+    };
+    QVector<SliceInfo> infos;
+    infos.reserve(slices.size());
+    for (int i = 0; i < slices.size(); ++i) {
+        QPieSlice *s = slices[i];
+        if (s->angleSpan() <= 0.0) continue;
+        double mid = fmod(s->startAngle() + s->angleSpan() * 0.5, 360.0);
+        infos.append({mid, i});
+    }
+    // Sort by midAngle
+    std::sort(infos.begin(), infos.end(),
+              [](const SliceInfo &a, const SliceInfo &b) { return a.midAngle < b.midAngle; });
+
+    // For each consecutive pair (including wrap-around last↔first), if
+    // they are too close hide the smaller slice's label.
+    auto angularDist = [](double a, double b) -> double {
+        double d = std::fabs(a - b);
+        return d > 180.0 ? 360.0 - d : d;
+    };
+    const int n = infos.size();
+    for (int i = 0; i < n; ++i) {
+        int j = (i + 1) % n;
+        if (i == j) break; // single slice
+        double sep = angularDist(infos[i].midAngle, infos[j].midAngle);
+        if (sep < kMinAngularSep) {
+            // Hide the label of the smaller slice
+            QPieSlice *si = slices[infos[i].index];
+            QPieSlice *sj = slices[infos[j].index];
+            if (si->value() < sj->value())
+                si->setLabelVisible(false);
+            else
+                sj->setLabelVisible(false);
+        }
+    }
+}
+
+// Event filter used to show hover tooltips for pie slices in a QChartView.
+// Maps the mouse position to the pie center/radius and finds the slice whose
+// angular span contains the cursor. A QToolTip is shown with absolute and
+// percent values. Implemented here to avoid QPieSlice::setToolTip which is not
+// available across all Qt versions.
+class PieTooltipFilter : public QObject {
+    Q_OBJECT
+public:
+    PieTooltipFilter(QPieSeries *series, QObject *parent = nullptr)
+        : QObject(parent), m_series(series), m_lastSlice(nullptr), m_candidateSlice(nullptr), m_candidateCount(0) {}
+
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override
+    {
+        QPieSeries *series = m_series.data();
+        if (!series || !watched)
+            return QObject::eventFilter(watched, event);
+
+        // When the mouse leaves the viewport, collapse any exploded slice
+        // and restore idle-mode label visibility.
+        if (event->type() == QEvent::Leave) {
+            if (m_lastSlice) {
+                m_lastSlice->setExploded(false);
+                m_lastSlice = nullptr;
+                updatePieSliceLabels(series, nullptr);
+            }
+            m_candidateSlice = nullptr;
+            m_candidateCount = 0;
+            return QObject::eventFilter(watched, event);
+        }
+
+        if (event->type() == QEvent::ToolTip || event->type() == QEvent::MouseMove) {
+            QWidget *w = qobject_cast<QWidget*>(watched);
+            QPoint pos;
+            // Handle QHelpEvent for ToolTip and QMouseEvent for MouseMove to
+            // avoid casting to the wrong event subclass which is undefined
+            // behaviour and can crash on some Qt versions.
+            if (event->type() == QEvent::ToolTip) {
+                QHelpEvent *he = static_cast<QHelpEvent*>(event);
+                pos = he->pos();
+            } else {
+                QMouseEvent *me = static_cast<QMouseEvent*>(event);
+                // Use pos() which returns a QPoint (widget coordinates)
+                pos = me->pos();
+            }
+            // Try to compute the pie center from the QChart's plotArea so the
+            // angle math matches the actual drawn pie.  plotArea() returns
+            // coordinates in the QChart's **local item** coordinate system,
+            // so we must map the cursor into that same space.  The chain is:
+            //   viewport coords  →  scene coords  →  chart-local coords
+            //   cv->mapToScene()     chart->mapFromScene()
+            //
+            // Fallback to widget center when chart/view isn't available.
+            QPointF center;
+            QChartView *cv = qobject_cast<QChartView*>(w->parentWidget());
+            QRectF pa;
+            QPointF cursorLocal;  // cursor position in the same coord space as pa / center
+            if (cv && cv->chart()) {
+                pa = cv->chart()->plotArea();
+                center = pa.center();
+                // Map cursor: viewport → scene → chart-local
+                QPointF scenePos = cv->mapToScene(pos);
+                cursorLocal = cv->chart()->mapFromScene(scenePos);
+            } else {
+                // viewport fallback — treat the viewport as the plot area
+                pa = QRectF(0, 0, w->width(), w->height());
+                center = QPointF(w->width() / 2.0, w->height() / 2.0);
+                cursorLocal = QPointF(pos);
+            }
+            QPointF delta = cursorLocal - center;
+            const double dist = std::hypot(delta.x(), delta.y());
+            // Disable exploding when the cursor is within a small center radius
+            // (25% of the smaller plot-area dimension) because hovering near
+            // the center often ambiguously maps to multiple slices.
+            const double centerRadius = qMin(cv ? cv->chart()->plotArea().width() : w->width(),
+                                             cv ? cv->chart()->plotArea().height() : w->height()) * 0.25;
+            if (dist < centerRadius) {
+                // Collapse last exploded slice if any
+                if (m_lastSlice) {
+                    m_lastSlice->setExploded(false);
+                    m_lastSlice = nullptr;
+                    updatePieSliceLabels(series, nullptr);
+                }
+                return false; // let normal tooltip processing continue
+            }
+
+            // ── Convert cursor angle from atan2 to Qt-pie convention ──────
+            // Screen atan2: 0°=right, +90°=down (Y-down screen coords)
+            // Qt pie chart: 0°=top (12 o'clock), angles increase clockwise
+            // Conversion:   qt_angle = atan2_angle + 90°
+            //
+            // The pie is always rendered as a **circle** inscribed in the
+            // shorter dimension of the plotArea — NOT as an ellipse filling
+            // the full rectangle.  Therefore we must NOT normalise the delta
+            // by the plotArea semi-axes; doing so would skew the angle and
+            // cause the wrong slice to be detected when the plotArea is
+            // non-square (e.g. 749×166).  Use the raw delta directly.
+            double atan2Deg = std::atan2(delta.y(), delta.x()) * 180.0 / M_PI;
+            double angle = fmod(atan2Deg + 90.0, 360.0);
+            if (angle < 0) angle += 360.0;
+
+            // Compute total once for the tooltip percentage display
+            double total = 0.0;
+            for (QPieSlice *s : series->slices()) total += s->value();
+
+            // ── Slice detection: use QPieSlice::startAngle() / angleSpan() ──
+            // These are the authoritative angles Qt uses to render each slice
+            // (Qt-pie convention: 0°=top, clockwise).  We simply check which
+            // slice's angular range contains the cursor angle we computed above.
+            bool found = false;
+            QPieSlice *foundSlice = nullptr;
+            for (QPieSlice *s : series->slices()) {
+                if (s->angleSpan() <= 0.0)
+                    continue;                       // skip zero-size slices
+                double sliceStart = fmod(s->startAngle(), 360.0);
+                if (sliceStart < 0) sliceStart += 360.0;
+                double sliceEnd = sliceStart + s->angleSpan();
+                // Normal case: the slice does not wrap around 360°
+                if (sliceEnd <= 360.0) {
+                    if (angle >= sliceStart && angle < sliceEnd) {
+                        found = true;
+                        foundSlice = s;
+                        break;
+                    }
+                } else {
+                    // Slice wraps around 360° → 0°
+                    if (angle >= sliceStart || angle < fmod(sliceEnd, 360.0)) {
+                        found = true;
+                        foundSlice = s;
+                        break;
+                    }
+                }
+            }
+
+            if (!found) {
+                // No slice under cursor: hide tooltip and collapse any previously exploded slice
+                QToolTip::hideText();
+                if (m_lastSlice) {
+                    m_lastSlice->setExploded(false);
+                    updatePieSliceLabels(series, nullptr);
+                }
+                m_lastSlice = nullptr;
+                m_candidateSlice = nullptr;
+                m_candidateCount = 0;
+                return QObject::eventFilter(watched, event);
+            }
+
+            // Compose the tooltip for foundSlice
+            QPieSlice *s = foundSlice;
+            double pct = (s->value() / total) * 100.0;
+            QString unit = (total >= 1000.0) ? i18n("kWh") : i18n("Wh");
+            double scale = (total >= 1000.0) ? 0.001 : 1.0;
+            QString name = s->property("memberName").toString();
+            if (name.isEmpty()) name = s->label();
+            QString tip = QString::fromUtf8("%1:\n%2 %3 (%4 %)")
+                          .arg(name)
+                          .arg(s->value() * scale, 0, 'f', (unit == "kWh") ? 3 : 1)
+                          .arg(unit)
+                          .arg(pct, 0, 'f', 1);
+            QToolTip::showText(w->mapToGlobal(pos), tip, w);
+
+            // Explode logic: introduce a tiny hysteresis so noisy moves near
+            // boundaries don't cause rapid flip-flopping. Require two consecutive
+            // detections of the same slice before switching the exploded slice.
+            if (m_lastSlice == s) {
+                // already exploded — nothing to do
+            } else if (m_candidateSlice == s) {
+                // second consecutive detection -> commit
+                ++m_candidateCount;
+                const int kConfirmCount = 2;
+                if (m_candidateCount >= kConfirmCount) {
+                    if (m_lastSlice) m_lastSlice->setExploded(false);
+                    s->setExploded(true);
+                    m_lastSlice = s;
+                    m_candidateSlice = nullptr;
+                    m_candidateCount = 0;
+                    updatePieSliceLabels(series, s);
+                }
+            } else {
+                // new candidate
+                m_candidateSlice = s;
+                m_candidateCount = 1;
+            }
+
+            return true; // handled
+        }
+        return QObject::eventFilter(watched, event);
+    }
+
+private:
+    QPointer<QPieSeries> m_series;
+    QPointer<QPieSlice>  m_lastSlice;
+    QPointer<QPieSlice>  m_candidateSlice;
+    int                  m_candidateCount;
+};
+
+// Q_OBJECT macro requires moc; include moc at end of file via generated rcc/moc
+// Include the moc generated file so PieTooltipFilter's Q_OBJECT is processed by moc.
+#include "chartwidget.moc"
+
 /// Wraps a QChartView in a container that shows a large current-value label
 /// in the top-right corner, overlaid via an absolute-positioned label on top
 /// of the chart view inside a QStackedLayout.
@@ -228,7 +558,7 @@ static QChartView *makeChartView(QChart *chart)
 /// If lockCheckBox is non-null it is overlaid inside the chart area, anchored
 /// to the bottom-left corner.
 static QWidget *makeChartTab(QChart *chart, const QString &currentValueText,
-                             QLabel **outLabel = nullptr,
+                             QPointer<QLabel> *outLabel = nullptr,
                              QScrollBar *scrollBar = nullptr,
                              QCheckBox *lockCheckBox = nullptr,
                              QComboBox *windowCombo = nullptr)
@@ -377,45 +707,15 @@ static void configureTimeAxis(QDateTimeAxis *axis, const QString &label)
 ChartWidget::ChartWidget(QWidget *parent)
     : QWidget(parent)
     , m_tabs(new QTabWidget(this))
-    , m_windowCombo(new QComboBox(this))
-    , m_windowComboTemp(new QComboBox(this))
+    // per-tab combos are created on demand; selected index persisted in m_windowComboIndex
     , m_scrollBar(new QScrollBar(Qt::Horizontal, this))
     , m_powerScrollBar(new QScrollBar(Qt::Horizontal, this))
 {
     // Time-window combos: 9 options matching kWindowLabels[], default index 2 (30 min).
     // m_windowCombo is for the Power chart; m_windowComboTemp is for Temperature.
     // They are always kept in sync — changing one updates the other silently.
-    auto initCombo = [](QComboBox *c) {
-        for (int i = 0; i < 9; ++i)
-            c->addItem(i18n("Last %1", kWindowLabels[i]));
-        c->setCurrentIndex(2);
-        c->hide();  // hidden until reparented into a chart overlay by makeChartTab()
-    };
-    initCombo(m_windowCombo);
-    initCombo(m_windowComboTemp);
-
-    // Primary → secondary sync + action
-    connect(m_windowCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, [this](int idx) {
-        if (m_windowComboTemp) {
-            m_windowComboTemp->blockSignals(true);
-            m_windowComboTemp->setCurrentIndex(idx);
-            m_windowComboTemp->blockSignals(false);
-        }
-        onWindowComboChanged(idx);
-        saveChartState();
-    });
-    // Secondary → primary sync + action
-    connect(m_windowComboTemp, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, [this](int idx) {
-        if (m_windowCombo) {
-            m_windowCombo->blockSignals(true);
-            m_windowCombo->setCurrentIndex(idx);
-            m_windowCombo->blockSignals(false);
-        }
-        onWindowComboChanged(idx);
-        saveChartState();
-    });
+    // No persistent combo objects here; per-tab combos are created by builders using
+    // the persisted m_windowComboIndex and update that index on change.
     // Save active tab whenever the user switches tabs.
     connect(m_tabs, &QTabWidget::currentChanged, this, [this](int) {
         saveChartState();
@@ -491,6 +791,18 @@ void ChartWidget::onEnergyResolutionChanged(int index)
     // buildEnergyHistoryChart* will create a new combo and assign it.
     m_energyResCombo = nullptr;
     m_energyChartView = nullptr;
+    // If a previous group pie view / series existed and is about to be destroyed
+    // when we delete the tabs below, remove its event filter and clear cached
+    // pointers so we don't later dereference freed objects.
+    if (m_groupPieTooltipFilter) {
+        if (m_groupEnergyPieView)
+            m_groupEnergyPieView->viewport()->removeEventFilter(m_groupPieTooltipFilter);
+        // The filter's parent is the viewport so it will be deleted with the view;
+        // just drop our pointer to avoid use-after-free.
+        m_groupPieTooltipFilter = nullptr;
+    }
+    m_groupEnergyPie = nullptr;
+    m_groupEnergyPieView = nullptr;
 
     if (m_energyHistoryTabIndex >= 0 && m_energyHistoryTabIndex < m_tabs->count()) {
         // Remember which tab the user is on before we touch anything.
@@ -611,20 +923,50 @@ void ChartWidget::updateDevice(const FritzDevice &device,
 
     // Re-parent both scroll bars back to this widget before destroying the old tabs,
     // so they are not deleted when the tab containers they were embedded in are deleted.
-    if (m_scrollBar)
-        m_scrollBar->setParent(this);
-    if (m_powerScrollBar)
-        m_powerScrollBar->setParent(this);
+    // Reparent transient controls back to this widget to avoid them being
+    // deleted when their previous tab container is removed. Use QPointer
+    // guards where members may be null or already deleted.
+    if (QPointer<QScrollBar> sb = m_scrollBar) sb->setParent(this);
+    if (QPointer<QScrollBar> psb = m_powerScrollBar) psb->setParent(this);
 
     // Block currentChanged signals during the entire clear+rebuild cycle so that
     // intermediate tab changes (caused by removeTab/addTab) do not fire
     // saveChartState() with transient/wrong tab names.
     m_tabs->blockSignals(true);
 
-    // Clear all tabs
+    // Clear all tabs. When deleting a tab that may own the pie/chart view,
+    // remove the pie event filter and clear cached pointers to avoid
+    // use-after-free if the ChartWidget keeps a raw pointer to the series
+    // or view that will be deleted with the tab widget.
     while (m_tabs->count() > 0) {
         QWidget *w = m_tabs->widget(0);
         m_tabs->removeTab(0);
+        // If the widget being deleted contains the pie view's viewport, make
+        // sure to remove the installed event filter and drop our pointers.
+        if (m_groupEnergyPieView && w && (w == m_groupEnergyPieView || w->isAncestorOf(m_groupEnergyPieView))) {
+         if (m_groupPieTooltipFilter && m_groupEnergyPieView)
+                m_groupEnergyPieView->viewport()->removeEventFilter(m_groupPieTooltipFilter);
+            m_groupPieTooltipFilter = nullptr;
+            m_groupEnergyPie = nullptr;
+            m_groupEnergyPieView = nullptr;
+        }
+        // Several UI widgets stored as member pointers live inside tab widgets
+        // (labels, combos). If the tab being deleted owns them, clear our cached
+        // pointers so we don't later dereference freed widgets.
+        if (w) {
+            if (m_gaugeKwhLabel && (w == m_gaugeKwhLabel || w->isAncestorOf(m_gaugeKwhLabel)))
+                m_gaugeKwhLabel = nullptr;
+            if (m_gaugePowerLabel && (w == m_gaugePowerLabel || w->isAncestorOf(m_gaugePowerLabel)))
+                m_gaugePowerLabel = nullptr;
+            if (m_gaugeVoltageLabel && (w == m_gaugeVoltageLabel || w->isAncestorOf(m_gaugeVoltageLabel)))
+                m_gaugeVoltageLabel = nullptr;
+            // pie mode combo is not a per-tab owned widget; we clear any cached
+            // transient pointers in the tab as done for other labels above.
+            if (m_powerValueLabel && (w == m_powerValueLabel || w->isAncestorOf(m_powerValueLabel)))
+                m_powerValueLabel = nullptr;
+            if (m_tempValueLabel && (w == m_tempValueLabel || w->isAncestorOf(m_tempValueLabel)))
+                m_tempValueLabel = nullptr;
+        }
         delete w;
     }
 
@@ -637,7 +979,7 @@ void ChartWidget::updateDevice(const FritzDevice &device,
     }
     if (device.hasEnergyMeter()) {
         buildPowerChart(device, memberDevices);
-        buildEnergyGauge(device);
+        buildEnergyGauge(device, memberDevices);
         // Build energy history chart only on first display or device switch.
         // On repeated poll-driven updateDevice calls for the same device the
         // energy history tab is left in place; it is rebuilt by updateEnergyStats
@@ -1031,6 +1373,14 @@ void ChartWidget::updateGroupEnergyStats(const QList<QPair<QString, DeviceBasicS
         saveChartState();
         updateSliderVisibility();
     }
+
+    // Note: Do NOT rebuild the group energy pie chart here.
+    // The pie chart must use lifetime cumulative energy from energyStats (same as the member's
+    // individual Energy gauge), not time-series values. Since DeviceBasicStats only contains
+    // time-series data (not energyStats), we can't construct the correct pie here.
+    // Instead, the pie chart is correctly built in buildEnergyGauge() which has access to
+    // the full EnergyStats via memberDevices. That function is called whenever device data
+    // is updated, which includes after new energy history stats arrive.
 }
 
 // ---------------------------------------------------------------------------
@@ -1039,28 +1389,8 @@ void ChartWidget::updateGroupEnergyStats(const QList<QPair<QString, DeviceBasicS
 
 void ChartWidget::buildTemperatureChart(const FritzDevice &dev)
 {
-    // Reclaim the window combo so it isn't destroyed with the previous tab.
-    // If the QPointer went null (combo was destroyed with the tab), recreate it.
-    if (m_windowComboTemp) {
-        m_windowComboTemp->setParent(this);
-        m_windowComboTemp->hide();
-    } else {
-        m_windowComboTemp = new QComboBox(this);
-        for (int i = 0; i < 9; ++i)
-            m_windowComboTemp->addItem(i18n("Last %1", kWindowLabels[i]));
-        m_windowComboTemp->setCurrentIndex(m_windowCombo ? m_windowCombo->currentIndex() : 2);
-        m_windowComboTemp->hide();
-        connect(m_windowComboTemp, QOverload<int>::of(&QComboBox::currentIndexChanged),
-                this, [this](int idx) {
-            if (m_windowCombo) {
-                m_windowCombo->blockSignals(true);
-                m_windowCombo->setCurrentIndex(idx);
-                m_windowCombo->blockSignals(false);
-            }
-            onWindowComboChanged(idx);
-            saveChartState();
-        });
-    }
+    // Per-tab time-window combo is created below; persistent combo instances
+    // are no longer reused via reparenting to avoid lifetime/reparenting issues.
 
     QLineSeries *series = new QLineSeries();
     series->setName(i18n("Temperature"));
@@ -1157,33 +1487,19 @@ void ChartWidget::buildTemperatureChart(const FritzDevice &dev)
     if (dev.temperature > -273.0)
         currentText = QString::number(dev.temperature, 'f', 1) + " °C";
 
-    m_tabs->addTab(makeChartTab(chart, currentText, &m_tempValueLabel, m_scrollBar, m_tempLockCheckBox, m_windowComboTemp), i18n("Temperature"));
+    // Create a per-tab time-window combo and initialize from m_windowComboIndex
+    QComboBox *tmpWindowCombo = new QComboBox();
+    for (int i = 0; i < 9; ++i) tmpWindowCombo->addItem(i18n("Last %1", kWindowLabels[i]));
+    tmpWindowCombo->setCurrentIndex(qBound(0, m_windowComboIndex, 8));
+    connect(tmpWindowCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+            [this](int idx){ m_windowComboIndex = idx; onWindowComboChanged(idx); saveChartState(); });
+    m_tabs->addTab(makeChartTab(chart, currentText, &m_tempValueLabel, m_scrollBar, m_tempLockCheckBox, tmpWindowCombo), i18n("Temperature"));
 }
 
 void ChartWidget::buildGroupTemperatureChart(const FritzDeviceList &memberDevices)
 {
-    // Reclaim the window combo so it isn't destroyed with the previous tab.
-    // If the QPointer went null (combo was destroyed with the tab), recreate it.
-    if (m_windowComboTemp) {
-        m_windowComboTemp->setParent(this);
-        m_windowComboTemp->hide();
-    } else {
-        m_windowComboTemp = new QComboBox(this);
-        for (int i = 0; i < 9; ++i)
-            m_windowComboTemp->addItem(i18n("Last %1", kWindowLabels[i]));
-        m_windowComboTemp->setCurrentIndex(m_windowCombo ? m_windowCombo->currentIndex() : 2);
-        m_windowComboTemp->hide();
-        connect(m_windowComboTemp, QOverload<int>::of(&QComboBox::currentIndexChanged),
-                this, [this](int idx) {
-            if (m_windowCombo) {
-                m_windowCombo->blockSignals(true);
-                m_windowCombo->setCurrentIndex(idx);
-                m_windowCombo->blockSignals(false);
-            }
-            onWindowComboChanged(idx);
-            saveChartState();
-        });
-    }
+    // Per-tab time-window combo is created below; persistent combo instances
+    // are no longer reused via reparenting to avoid lifetime/reparenting issues.
 
     // Collect temperature-capable members
     FritzDeviceList tempMembers;
@@ -1288,34 +1604,19 @@ void ChartWidget::buildGroupTemperatureChart(const FritzDeviceList &memberDevice
         saveChartState();
     });
 
-    m_tabs->addTab(makeChartTab(chart, QString(), nullptr, m_scrollBar, m_tempLockCheckBox, m_windowComboTemp), i18n("Temperature"));
+    QComboBox *tmpWindowCombo = new QComboBox();
+    for (int i = 0; i < 9; ++i) tmpWindowCombo->addItem(i18n("Last %1", kWindowLabels[i]));
+    tmpWindowCombo->setCurrentIndex(qBound(0, m_windowComboIndex, 8));
+    connect(tmpWindowCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+            [this](int idx){ m_windowComboIndex = idx; onWindowComboChanged(idx); saveChartState(); });
+    m_tabs->addTab(makeChartTab(chart, QString(), nullptr, m_scrollBar, m_tempLockCheckBox, tmpWindowCombo), i18n("Temperature"));
 }
 
 void ChartWidget::buildPowerChart(const FritzDevice &dev,
                                   const FritzDeviceList &memberDevices)
 {
-    // Reclaim the window combo so it isn't destroyed with the previous tab.
-    // If the QPointer went null (combo was destroyed with the tab), recreate it.
-    if (m_windowCombo) {
-        m_windowCombo->setParent(this);
-        m_windowCombo->hide();
-    } else {
-        m_windowCombo = new QComboBox(this);
-        for (int i = 0; i < 9; ++i)
-            m_windowCombo->addItem(i18n("Last %1", kWindowLabels[i]));
-        m_windowCombo->setCurrentIndex(m_windowComboTemp ? m_windowComboTemp->currentIndex() : 2);
-        m_windowCombo->hide();
-        connect(m_windowCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
-                this, [this](int idx) {
-            if (m_windowComboTemp) {
-                m_windowComboTemp->blockSignals(true);
-                m_windowComboTemp->setCurrentIndex(idx);
-                m_windowComboTemp->blockSignals(false);
-            }
-            onWindowComboChanged(idx);
-            saveChartState();
-        });
-    }
+    // Per-tab time-window combo is created below; persistent combo instances
+    // are no longer reused via reparenting to avoid lifetime/reparenting issues.
 
     // Determine whether to build a stacked chart (group with ≥2 energy-capable members)
     // or the standard single-device area chart.
@@ -1439,7 +1740,12 @@ void ChartWidget::buildPowerChart(const FritzDevice &dev,
         m_powerAxisX = axisX;
         m_powerAxisY = axisY;
         // m_powerSeries / m_powerLowerSeries stay nullptr in stacked mode
-        m_tabs->addTab(makeChartTab(chart, currentText, &m_powerValueLabel, m_powerScrollBar, m_powerLockCheckBox, m_windowCombo), i18n("Power"));
+        QComboBox *tmpWindowCombo = new QComboBox();
+        for (int i = 0; i < 9; ++i) tmpWindowCombo->addItem(i18n("Last %1", kWindowLabels[i]));
+        tmpWindowCombo->setCurrentIndex(qBound(0, m_windowComboIndex, 8));
+        connect(tmpWindowCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+                [this](int idx){ m_windowComboIndex = idx; onWindowComboChanged(idx); saveChartState(); });
+        m_tabs->addTab(makeChartTab(chart, currentText, &m_powerValueLabel, m_powerScrollBar, m_powerLockCheckBox, tmpWindowCombo), i18n("Power"));
 
     } else {
         // Single-device (or group with <2 energy members): original area chart
@@ -1493,7 +1799,12 @@ void ChartWidget::buildPowerChart(const FritzDevice &dev,
         if (dev.energyStats.valid)
             currentText = QString::number(dev.energyStats.power, 'f', 1) + " W";
 
-        m_tabs->addTab(makeChartTab(chart, currentText, &m_powerValueLabel, m_powerScrollBar, m_powerLockCheckBox, m_windowCombo), i18n("Power"));
+        QComboBox *tmpWindowCombo = new QComboBox();
+        for (int i = 0; i < 9; ++i) tmpWindowCombo->addItem(i18n("Last %1", kWindowLabels[i]));
+        tmpWindowCombo->setCurrentIndex(qBound(0, m_windowComboIndex, 8));
+        connect(tmpWindowCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+                [this](int idx){ m_windowComboIndex = idx; onWindowComboChanged(idx); saveChartState(); });
+        m_tabs->addTab(makeChartTab(chart, currentText, &m_powerValueLabel, m_powerScrollBar, m_powerLockCheckBox, tmpWindowCombo), i18n("Power"));
     }
 }
 
@@ -1535,11 +1846,24 @@ void ChartWidget::buildHumidityChart(const FritzDevice &dev)
     m_tabs->addTab(makeChartView(chart), i18n("Humidity"));
 }
 
-void ChartWidget::buildEnergyGauge(const FritzDevice &dev)
+void ChartWidget::buildEnergyGauge(const FritzDevice &dev,
+                                    const FritzDeviceList &memberDevices)
 {
-    // Simple summary panel: total energy consumed as a styled label widget
+    // Outer panel keeps the default (grey) tab background so that the
+    // QTabWidget frame stays visible — matching Temperature / Power tabs.
     QWidget *panel = new QWidget();
-    QVBoxLayout *vl = new QVBoxLayout(panel);
+    QVBoxLayout *outerVl = new QVBoxLayout(panel);
+
+    // Inner content widget with a white background — labels and chart
+    // live here, giving a consistent white area framed by the grey tab border.
+    QWidget *inner = new QWidget();
+    QPalette pal = inner->palette();
+    pal.setColor(QPalette::Window, Qt::white);
+    inner->setPalette(pal);
+    inner->setAutoFillBackground(true);
+    outerVl->addWidget(inner);
+
+    QVBoxLayout *vl = new QVBoxLayout(inner);
     vl->setAlignment(Qt::AlignCenter);
 
     auto makeLabel = [](const QString &text, int ptSize, bool bold) -> QLabel * {
@@ -1571,6 +1895,114 @@ void ChartWidget::buildEnergyGauge(const FritzDevice &dev)
         }
     } else {
         vl->addWidget(makeLabel(i18n("No energy data available"), 12, false));
+    }
+
+    // If this is a group device, and we have per-member energy stats available
+    // in the memberDevices parameter, show a pie chart of each member's total energy share
+    // (Wh). Keep this lightweight: only build when at least one member reports
+    // valid energyStats.
+    if (dev.isGroup()) {
+        // Build pie only if we have member energy stats in the memberDevices parameter.
+        QVector<QPair<QString, double>> memberEnergies;
+        for (const FritzDevice &mem : memberDevices) {
+            if (mem.hasEnergyMeter() && mem.energyStats.valid) {
+                const QString label = mem.name.isEmpty() ? mem.ain : mem.name;
+                memberEnergies.append({ label, mem.energyStats.energy });
+            }
+        }
+    if (!memberEnergies.isEmpty()) {
+        // Build or update the pie series and view stored in members so we
+        // can update it dynamically when new per-member stats arrive.
+        QPieSeries *pie = nullptr;
+        if (m_groupEnergyPie) {
+            pie = m_groupEnergyPie;
+            pie->clear();
+            // Ensure existing slices are deleted to avoid stale tooltips
+            // (QPieSeries::clear() handles this on most Qt versions but be safe)
+            while (pie->slices().size() > 0) {
+                pie->remove(pie->slices().first());
+            }
+        } else {
+            pie = new QPieSeries();
+            m_groupEnergyPie = pie;
+        }
+
+            static const QColor kPiePalette[] = {
+                QColor(0,   120, 215),
+                QColor(220, 80,  0  ),
+                QColor(0,   153, 76 ),
+                QColor(180, 0,   180),
+                QColor(200, 160, 0  ),
+                QColor(0,   180, 200),
+                QColor(220, 50,  50 ),
+                QColor(80,  80,  200),
+            };
+            const int paletteSize = static_cast<int>(sizeof(kPiePalette) / sizeof(kPiePalette[0]));
+
+            int idx = 0;
+            double total = 0.0;
+            for (const auto &p : memberEnergies) total += p.second;
+            for (const auto &p : memberEnergies) {
+                QPieSlice *slice = pie->append(p.first, p.second);
+                QColor c = kPiePalette[idx % paletteSize];
+                c.setAlpha(200);
+                slice->setColor(c);
+                // Store raw member name for later label/tooltip composition.
+                slice->setProperty("memberName", p.first);
+                ++idx;
+            }
+
+            // Set explode distance on every (re)build — new slices after
+            // pie->clear() get the default factor (0.05) unless we re-apply.
+            // Use a moderate factor (0.10) so the explode is visible but the
+            // displaced slice (and its label) stays within the chart area.
+            // Also shorten the label arm so that labels stay close to the
+            // pie rim and are less likely to be clipped at the widget edge.
+            for (QPieSlice *s : pie->slices()) {
+                s->setExploded(false);
+                s->setExplodeDistanceFactor(0.10);
+                s->setLabelArmLengthFactor(0.05);
+            }
+
+            if (!m_groupEnergyPieView) {
+                QChart *pieChart = makeBaseChart(i18n("Member Energy"));
+                pieChart->addSeries(pie);
+                // Hide legend because slice labels contain full info.
+                pieChart->legend()->hide();
+                pieChart->setTitle(i18n("Member Energy Distribution"));
+                // Add generous margins so that labels of exploded slices
+                // are not clipped at the widget boundary.  The pie circle
+                // is inscribed in the plotArea, so wider margins shrink
+                // the circle and leave room for the label text outside it.
+                pieChart->setMargins(QMargins(10, 10, 10, 10));
+                m_groupEnergyPieView = makeChartView(pieChart);
+                m_groupEnergyPieView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+                // Tall enough that the pie stays usable despite the margins.
+                m_groupEnergyPieView->setMinimumHeight(280);
+                if (m_groupEnergyPie && !m_groupPieTooltipFilter) {
+                    PieTooltipFilter *f = new PieTooltipFilter(m_groupEnergyPie, m_groupEnergyPieView->viewport());
+                    m_groupEnergyPieView->viewport()->installEventFilter(f);
+                    m_groupPieTooltipFilter = f;
+                }
+                // Ensure mouse tracking so hovered signals are delivered without mouse press
+                m_groupEnergyPieView->setMouseTracking(true);
+                if (m_groupEnergyPieView->viewport())
+                    m_groupEnergyPieView->viewport()->setMouseTracking(true);
+
+                // Place the pie directly under the "Total Energy Consumed" widget
+                // by inserting it immediately after the KWh label.
+                int insertPos = vl->indexOf(m_gaugeKwhLabel);
+                if (insertPos >= 0)
+                    vl->insertWidget(insertPos + 1, m_groupEnergyPieView);
+                else
+                    vl->addWidget(m_groupEnergyPieView);
+            }
+
+            // Update labels on every (re)build — not just first creation —
+            // so that newly appended slices get proper label text and the
+            // overlap-aware visibility logic runs.
+            updateGroupPieLabels();
+        }
     }
 
     m_tabs->addTab(panel, i18n("Energy"));
@@ -2126,6 +2558,8 @@ void ChartWidget::buildEnergyHistoryChart(const DeviceBasicStats &stats)
     stack->addWidget(totalOverlay);
     comboOverlay->raise();
     totalOverlay->raise();
+
+    // No pie mode combo — labels always show both absolute and percent values.
 
     // ---- Hover tooltip on each bar ----
     // We use the QHelpEvent mechanism (eventFilter below) to show the tooltip
@@ -2702,7 +3136,7 @@ void ChartWidget::buildEnergyHistoryChartStacked(
 
 qint64 ChartWidget::windowMs() const
 {
-    int idx = m_windowCombo ? qBound(0, m_windowCombo->currentIndex(), 8) : 2;
+    int idx = qBound(0, m_windowComboIndex, 8);
     return kWindowMs[idx];
 }
 
@@ -3031,7 +3465,7 @@ bool ChartWidget::eventFilter(QObject *watched, QEvent *event)
 void ChartWidget::saveChartState() const
 {
     QSettings s;
-    s.setValue(QStringLiteral("ui/chartSlider"), m_windowCombo ? m_windowCombo->currentIndex() : 2);
+    s.setValue(QStringLiteral("ui/chartSlider"), m_windowComboIndex);
     if (m_tabs->currentIndex() >= 0) {
         const QString tabName = plainTabText(m_tabs->tabText(m_tabs->currentIndex()));
         s.setValue(QStringLiteral("ui/chartTab"), tabName);
@@ -3048,17 +3482,10 @@ void ChartWidget::saveChartState() const
 void ChartWidget::loadChartState()
 {
     QSettings s;
-    if (s.contains(QStringLiteral("ui/chartSlider")) && m_windowCombo) {
-        int val = qBound(0, s.value(QStringLiteral("ui/chartSlider")).toInt(), 8);
-        m_windowCombo->blockSignals(true);
-        m_windowCombo->setCurrentIndex(val);
-        m_windowCombo->blockSignals(false);
-        if (m_windowComboTemp) {
-            m_windowComboTemp->blockSignals(true);
-            m_windowComboTemp->setCurrentIndex(val);
-            m_windowComboTemp->blockSignals(false);
-        }
+    if (s.contains(QStringLiteral("ui/chartSlider"))) {
+        m_windowComboIndex = qBound(0, s.value(QStringLiteral("ui/chartSlider")).toInt(), 8);
     }
+    // Pie display mode removed; labels always show both absolute and percent.
     m_energyResSelectedIdx = s.value(QStringLiteral("ui/energyResIdx"), 0).toInt();
     m_powerScaleLocked = s.value(QStringLiteral("ui/powerScaleLocked"), false).toBool();
     m_lockedPowerMin   = s.value(QStringLiteral("ui/lockedPowerMin"),   0.0).toDouble();

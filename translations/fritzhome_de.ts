@@ -679,6 +679,22 @@ und passt sich nicht mehr automatisch an neue Daten oder
         <translation>Wh</translation>
     </message>
     <message>
+        <source>Percent</source>
+        <translation>Prozent</translation>
+    </message>
+    <message>
+        <source>Absolute</source>
+        <translation>Absolut</translation>
+    </message>
+    <message>
+        <source>Member Energy</source>
+        <translation>Mitgliederenergie</translation>
+    </message>
+    <message>
+        <source>Member Energy Distribution</source>
+        <translation>Energieverteilung der Mitglieder</translation>
+    </message>
+    <message>
         <source>Target</source>
         <translation>Sollwert</translation>
     </message>

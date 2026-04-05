@@ -509,6 +509,18 @@ msgstr "kWh"
 msgid "Wh"
 msgstr "Wh"
 
+msgid "Percent"
+msgstr "Prozent"
+
+msgid "Absolute"
+msgstr "Absolut"
+
+msgid "Member Energy"
+msgstr "Mitgliederenergie"
+
+msgid "Member Energy Distribution"
+msgstr "Energieverteilung der Mitglieder"
+
 msgid "Target"
 msgstr "Sollwert"
 

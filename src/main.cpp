@@ -13,6 +13,13 @@
 
 #include "mainwindow.h"
 #include "secretstore.h"
+// (No file-based debug logger in final build)
+
+// Install a simple file-based message handler so qDebug/qWarning/etc. are
+// captured even when the app is started from a launcher/systemd. The path can
+// be overridden with the FRITZHOME_LOGFILE environment variable; default is
+// /tmp/fritzhome.log.
+// The message handler was used only during debugging and has been removed.
 
 int main(int argc, char *argv[])
 {
