@@ -835,11 +835,21 @@ Daten werden angezeigt, sobald sie von der Fritz!Box verfügbar sind.</translati
     <message>
         <source>Nov</source>
         <translation>Nov</translation>
-    </message>
-    <message>
-        <source>Dec</source>
-        <translation>Dez</translation>
-    </message>
+     </message>
+     <message>
+         <source>Dec</source>
+         <translation>Dez</translation>
+     </message>
+     <message>
+         <source>Error fetching energy history: %1</source>
+         <translation>Fehler beim Abrufen des Energieverlaufs: %1</translation>
+     </message>
+     <message>
+         <source>Error fetching energy history for group:
+%1</source>
+         <translation>Fehler beim Abrufen des Energieverlaufs für die Gruppe:
+%1</translation>
+     </message>
 
-</context>
-</TS>
+ </context>
+ </TS>

@@ -10,6 +10,9 @@
 #include <QScrollBar>
 #include <QComboBox>
 #include <QCheckBox>
+#include <QPlainTextEdit>
+#include <QTextOption>
+#include <QIcon>
 #include <QDateTime>
 #include <QSettings>
 #include <QToolTip>
@@ -266,6 +269,81 @@ static QChartView *makeChartView(QChart *chart)
     view->setRenderHint(QPainter::Antialiasing);
     view->setMinimumHeight(200);
     return view;
+}
+
+// Helper function to wrap a widget with the grey frame border effect
+// (matching the look of charts in other tabs)
+static QWidget *wrapInFramedContainer(QWidget *innerWidget)
+{
+    // Outer panel keeps the default (grey) tab background so that the
+    // QTabWidget frame stays visible — matching other tabs.
+    QWidget *panel = new QWidget();
+    QVBoxLayout *outerVl = new QVBoxLayout(panel);
+    // NOTE: Do NOT set margins to 0 — the default margins create the grey frame effect!
+
+    // Inner content widget with a white background
+    QWidget *inner = new QWidget();
+    QPalette pal = inner->palette();
+    pal.setColor(QPalette::Window, Qt::white);
+    inner->setPalette(pal);
+    inner->setAutoFillBackground(true);
+
+    QVBoxLayout *innerVl = new QVBoxLayout(inner);
+    innerVl->setContentsMargins(0, 0, 0, 0);
+    innerWidget->setParent(inner);
+    innerVl->addWidget(innerWidget);
+
+    outerVl->addWidget(inner);
+    return panel;
+}
+
+// Helper function to create a formatted error display widget with icon and bullet list
+static QWidget *createErrorDisplayWidget(const QString &caption, const QStringList &errors)
+{
+    QWidget *container = new QWidget();
+    QVBoxLayout *mainLayout = new QVBoxLayout(container);
+    mainLayout->setContentsMargins(16, 16, 16, 16);
+    mainLayout->setSpacing(12);
+
+    // Header with icon and caption
+    QHBoxLayout *headerLayout = new QHBoxLayout();
+    headerLayout->setSpacing(12);
+
+    QLabel *iconLabel = new QLabel();
+    QIcon errorIcon = QIcon::fromTheme(QStringLiteral("dialog-error"));
+    if (!errorIcon.isNull()) {
+        iconLabel->setPixmap(errorIcon.pixmap(32, 32));
+    }
+    headerLayout->addWidget(iconLabel);
+
+    QLabel *captionLabel = new QLabel(caption);
+    QFont captionFont = captionLabel->font();
+    captionFont.setBold(true);
+    captionFont.setPointSize(captionFont.pointSize() + 1);
+    captionLabel->setFont(captionFont);
+    captionLabel->setWordWrap(true);
+    headerLayout->addWidget(captionLabel, 1);
+
+    mainLayout->addLayout(headerLayout);
+
+    // Error messages as bullet list
+    if (!errors.isEmpty()) {
+        QLabel *errorListLabel = new QLabel();
+        errorListLabel->setWordWrap(true);
+
+        // Build HTML for bullet list
+        QString htmlContent = "<ul style='margin-top: 0; margin-bottom: 0;'>";
+        for (const QString &error : errors) {
+            htmlContent += "<li>" + error.toHtmlEscaped() + "</li>";
+        }
+        htmlContent += "</ul>";
+
+        errorListLabel->setText(htmlContent);
+        mainLayout->addWidget(errorListLabel);
+    }
+
+    mainLayout->addStretch();
+    return container;
 }
 
 // ---------------------------------------------------------------------------
@@ -861,6 +939,8 @@ void ChartWidget::updateDevice(const FritzDevice &device,
     if (deviceChanged) {
         m_groupHistoryMode = false;
         m_lastGroupMemberStats.clear();
+        m_energyError.clear();
+        m_groupEnergyErrors.clear();
         // Unlock the power Y scale so it auto-fits the new device's data
         m_powerScaleLocked = false;
         if (m_powerLockCheckBox) {
@@ -1263,6 +1343,9 @@ static int computeAvailableGridsForGroup(
 
 void ChartWidget::updateEnergyStats(const DeviceBasicStats &stats)
 {
+    // Clear any previous error when new data arrives successfully
+    m_energyError.clear();
+
     // Compute which grids are available in the new stats
     int currentAvailableGrids = computeAvailableGrids(stats);
 
@@ -1324,6 +1407,9 @@ void ChartWidget::updateEnergyStats(const DeviceBasicStats &stats)
 
 void ChartWidget::updateGroupEnergyStats(const QList<QPair<QString, DeviceBasicStats>> &memberStats)
 {
+    // Clear any previous errors when new data arrives successfully
+    m_groupEnergyErrors.clear();
+
     // Compute which grids are available in the new member stats
     int currentAvailableGrids = computeAvailableGridsForGroup(memberStats);
 
@@ -1381,6 +1467,113 @@ void ChartWidget::updateGroupEnergyStats(const QList<QPair<QString, DeviceBasicS
     // Instead, the pie chart is correctly built in buildEnergyGauge() which has access to
     // the full EnergyStats via memberDevices. That function is called whenever device data
     // is updated, which includes after new energy history stats arrive.
+}
+
+void ChartWidget::updateEnergyStatsError(const QString &error)
+{
+    // Store the error and update the placeholder if it's currently displayed
+    m_energyError = error;
+
+    if (m_energyHistoryTabIndex >= 0 && m_energyHistoryTabIndex < m_tabs->count()) {
+        QWidget *current = m_tabs->widget(m_energyHistoryTabIndex);
+
+        // If it's already a framed container (error display), update the content inside
+        QVBoxLayout *layout = qobject_cast<QVBoxLayout *>(current->layout());
+        if (layout && layout->count() > 0) {
+            // This is the outer panel; get the inner widget
+            QWidget *inner = layout->itemAt(0)->widget();
+            if (inner) {
+                QVBoxLayout *innerLayout = qobject_cast<QVBoxLayout *>(inner->layout());
+                if (innerLayout && innerLayout->count() > 0) {
+                    // If the inner widget is our error display widget, replace it
+                    QWidget *oldWidget = innerLayout->itemAt(0)->widget();
+                    if (oldWidget) {
+                        innerLayout->removeWidget(oldWidget);
+                        delete oldWidget;
+
+                        // Create new error display with updated message
+                        QString caption = i18n("Error fetching energy history");
+                        QStringList errorList;
+                        errorList.append(error);
+                        QWidget *errorWidget = createErrorDisplayWidget(caption, errorList);
+                        innerLayout->addWidget(errorWidget);
+                        return;
+                    }
+                }
+            }
+        }
+
+        // Otherwise, replace the placeholder with a framed error display
+        m_tabs->blockSignals(true);
+        QWidget *old = m_tabs->widget(m_energyHistoryTabIndex);
+        m_tabs->removeTab(m_energyHistoryTabIndex);
+        delete old;
+        m_energyResCombo = nullptr;
+        m_energyChartView = nullptr;
+
+        // Create formatted error display with framed styling
+        QString caption = i18n("Error fetching energy history");
+        QStringList errorList;
+        errorList.append(error);
+        QWidget *errorWidget = createErrorDisplayWidget(caption, errorList);
+        QWidget *framedWidget = wrapInFramedContainer(errorWidget);
+        m_tabs->insertTab(m_energyHistoryTabIndex, framedWidget, i18n("Energy History"));
+        m_tabs->blockSignals(false);
+    }
+}
+
+void ChartWidget::updateGroupEnergyStatsError(const QString &memberName, const QString &error)
+{
+    // Accumulate error messages for group members
+    QString errorMsg = memberName.isEmpty()
+        ? error
+        : i18n("%1: %2", memberName, error);
+
+    if (!m_groupEnergyErrors.contains(errorMsg))
+        m_groupEnergyErrors.append(errorMsg);
+
+    if (m_energyHistoryTabIndex >= 0 && m_energyHistoryTabIndex < m_tabs->count()) {
+        QWidget *current = m_tabs->widget(m_energyHistoryTabIndex);
+
+        // If it's already a framed container (error display), update the content inside
+        QVBoxLayout *layout = qobject_cast<QVBoxLayout *>(current->layout());
+        if (layout && layout->count() > 0) {
+            // This is the outer panel; get the inner widget
+            QWidget *inner = layout->itemAt(0)->widget();
+            if (inner) {
+                QVBoxLayout *innerLayout = qobject_cast<QVBoxLayout *>(inner->layout());
+                if (innerLayout && innerLayout->count() > 0) {
+                    // If the inner widget is our error display widget, replace it
+                    QWidget *oldWidget = innerLayout->itemAt(0)->widget();
+                    if (oldWidget) {
+                        innerLayout->removeWidget(oldWidget);
+                        delete oldWidget;
+
+                        // Create new error display with updated message list
+                        QString caption = i18n("Error fetching energy history for group");
+                        QWidget *errorWidget = createErrorDisplayWidget(caption, m_groupEnergyErrors);
+                        innerLayout->addWidget(errorWidget);
+                        return;
+                    }
+                }
+            }
+        }
+
+        // Otherwise, replace the placeholder with a framed error display
+        m_tabs->blockSignals(true);
+        QWidget *old = m_tabs->widget(m_energyHistoryTabIndex);
+        m_tabs->removeTab(m_energyHistoryTabIndex);
+        delete old;
+        m_energyResCombo = nullptr;
+        m_energyChartView = nullptr;
+
+        // Create formatted error display with framed styling
+        QString caption = i18n("Error fetching energy history for group");
+        QWidget *errorWidget = createErrorDisplayWidget(caption, m_groupEnergyErrors);
+        QWidget *framedWidget = wrapInFramedContainer(errorWidget);
+        m_tabs->insertTab(m_energyHistoryTabIndex, framedWidget, i18n("Energy History"));
+        m_tabs->blockSignals(false);
+    }
 }
 
 // ---------------------------------------------------------------------------

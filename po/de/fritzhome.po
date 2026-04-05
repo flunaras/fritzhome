@@ -627,3 +627,9 @@ msgstr "Nov"
 
 msgid "Dec"
 msgstr "Dez"
+
+msgid "Error fetching energy history: %1"
+msgstr "Fehler beim Abrufen des Energieverlaufs: %1"
+
+msgid "Error fetching energy history for group:\n%1"
+msgstr "Fehler beim Abrufen des Energieverlaufs für die Gruppe:\n%1"

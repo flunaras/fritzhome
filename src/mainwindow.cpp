@@ -255,37 +255,53 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_api, &FritzApi::deviceListUpdated,
             this,  &MainWindow::onDeviceListUpdated);
     connect(m_api, &FritzApi::deviceStatsUpdated,
-            this,  [this](const QString &ain, const DeviceBasicStats &stats) {
-                // Single-device case: AIN matches the selected device directly.
-                if (ain == m_selectedAin) {
-                    m_chartWidget->updateEnergyStats(stats);
-                    return;
-                }
-                // Group case: AIN is one of the members we are collecting,
-                // and the group is still the selected device (guard against
-                // stale replies from a previously selected group).
-                if (m_groupStatsPending > 0
-                    && m_selectedAin == m_groupAin
-                    && m_groupMemberStats.contains(ain)) {
-                    m_groupMemberStats[ain] = stats;
-                    --m_groupStatsPending;
-                    if (m_groupStatsPending == 0) {
-                        // All member stats arrived — build the stacked history chart
-                        // in device-list order (m_groupMemberOrder), not QMap alphabetical.
-                        // Pair first = device name (for legend/tooltip), second = stats.
-                        QList<QPair<QString, DeviceBasicStats>> memberStats;
-                        for (const QString &memberAin : m_groupMemberOrder) {
-                            auto it = m_groupMemberStats.constFind(memberAin);
-                            if (it != m_groupMemberStats.constEnd()) {
-                                FritzDevice memberDev = m_model->deviceByAin(memberAin);
-                                const QString label = memberDev.name.isEmpty()
-                                    ? memberAin : memberDev.name;
-                                memberStats.append({label, it.value()});
-                            }
-                        }
-                        m_chartWidget->updateGroupEnergyStats(memberStats);
-                    }
-                }
+             this,  [this](const QString &ain, const DeviceBasicStats &stats) {
+                 // Single-device case: AIN matches the selected device directly.
+                 if (ain == m_selectedAin) {
+                     m_chartWidget->updateEnergyStats(stats);
+                     return;
+                 }
+                 // Group case: AIN is one of the members we are collecting,
+                 // and the group is still the selected device (guard against
+                 // stale replies from a previously selected group).
+                 if (m_groupStatsPending > 0
+                     && m_selectedAin == m_groupAin
+                     && m_groupMemberStats.contains(ain)) {
+                     m_groupMemberStats[ain] = stats;
+                     --m_groupStatsPending;
+                     if (m_groupStatsPending == 0) {
+                         // All member stats arrived — build the stacked history chart
+                         // in device-list order (m_groupMemberOrder), not QMap alphabetical.
+                         // Pair first = device name (for legend/tooltip), second = stats.
+                         QList<QPair<QString, DeviceBasicStats>> memberStats;
+                         for (const QString &memberAin : m_groupMemberOrder) {
+                             auto it = m_groupMemberStats.constFind(memberAin);
+                             if (it != m_groupMemberStats.constEnd()) {
+                                 FritzDevice memberDev = m_model->deviceByAin(memberAin);
+                                 const QString label = memberDev.name.isEmpty()
+                                     ? memberAin : memberDev.name;
+                                 memberStats.append({label, it.value()});
+                             }
+                         }
+                         m_chartWidget->updateGroupEnergyStats(memberStats);
+                     }
+                 }
+             });
+    connect(m_api, &FritzApi::deviceStatsError,
+            this, [this](const QString &ain, const QString &error) {
+                 // Single-device case: AIN matches the selected device directly.
+                 if (ain == m_selectedAin) {
+                     m_chartWidget->updateEnergyStatsError(error);
+                     return;
+                 }
+                 // Group case: AIN is one of the members we are collecting.
+                 if (m_groupStatsPending > 0
+                     && m_selectedAin == m_groupAin
+                     && m_groupMemberStats.contains(ain)) {
+                     FritzDevice memberDev = m_model->deviceByAin(ain);
+                     const QString label = memberDev.name.isEmpty() ? ain : memberDev.name;
+                     m_chartWidget->updateGroupEnergyStatsError(label, error);
+                 }
             });
     connect(m_api, &FritzApi::networkError,
             this,  &MainWindow::onNetworkError);

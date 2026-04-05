@@ -86,6 +86,7 @@ signals:
     void sessionExpired();
     void deviceListUpdated(const FritzDeviceList &devices);
     void deviceStatsUpdated(const QString &ain, const DeviceBasicStats &stats);
+    void deviceStatsError(const QString &ain, const QString &error);
     void commandSuccess(const QString &ain, const QString &command);
     void commandFailed(const QString &ain, const QString &error);
     void networkError(const QString &error);

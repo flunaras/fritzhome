@@ -933,8 +933,10 @@ void FritzApi::onDeviceStatsReply(QNetworkReply *reply, const QString &ain)
             handleSessionExpiry();
             return;
         }
-        if (reply->error() != QNetworkReply::OperationCanceledError)
+        if (reply->error() != QNetworkReply::OperationCanceledError) {
             emit networkError(reply->errorString());
+            emit deviceStatsError(ain, reply->errorString());
+        }
         return;
     }
     QByteArray data = reply->readAll();

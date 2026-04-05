@@ -272,6 +272,9 @@ startPolling(intervalMs)
 fetchDeviceStats(ain)
   └─► GET /api/v0/smarthome/overview/units/{unitUID}  [Authorization: AVM-SID {sid}]
           └─► onDeviceStatsReply()
+                  ├── HTTP 401 → handleSessionExpiry()
+                  ├── network error → emit networkError(error)
+                  │                   emit deviceStatsError(ain, error)
                   ├── parseUnitStatsJson() → DeviceBasicStats
                   └── emit deviceStatsUpdated(ain, stats)
 
@@ -339,6 +342,8 @@ FritzApi::deviceListUpdated     → MainWindow::onDeviceListUpdated
 FritzApi::deviceStatsUpdated    → [lambda] → ChartWidget::updateEnergyStats (single device)
                                   or accumulate into m_groupMemberStats + call
                                   ChartWidget::updateGroupEnergyStats (group device)
+FritzApi::deviceStatsError      → [lambda] → ChartWidget::updateEnergyStatsError (single device)
+                                  or ChartWidget::updateGroupEnergyStatsError (group member)
 FritzApi::networkError          → MainWindow::onNetworkError
 FritzApi::commandSuccess        → MainWindow::onCommandSuccess  (triggers refresh)
 FritzApi::commandFailed         → MainWindow::onCommandFailed
@@ -534,6 +539,43 @@ recreates the combo with items and signal wiring from scratch.
   accounts for the tick marks that extend below `plotArea().bottom()`.  This makes the
   three gaps (axis→month, month→year, year→frame) equal regardless of font metrics.
 
+### Energy History error display
+
+When `FritzApi::fetchDeviceStats()` fails (network error, timeout, etc.), the
+`deviceStatsError(ain, error)` signal is emitted alongside `networkError`. MainWindow
+routes this to ChartWidget based on the current selection:
+
+- **Single device:** if `ain == m_selectedAin`, calls
+  `ChartWidget::updateEnergyStatsError(error)`.
+- **Group member:** if `ain` is in `m_groupMemberStats` (outstanding group fetch),
+  resolves the member name and calls
+  `ChartWidget::updateGroupEnergyStatsError(memberName, error)`.
+
+Both methods replace the Energy History tab content with a formatted error display
+widget wrapped in a grey-framed container (matching the visual style of chart tabs).
+The error display is built by two file-static helpers in `chartwidget.cpp`:
+
+- **`wrapInFramedContainer(innerWidget)`** — creates the two-layer panel structure
+  (outer widget with default margins for the grey frame, inner widget with white
+  `QPalette::Window` background) used by both the Energy gauge tab and error displays.
+- **`createErrorDisplayWidget(caption, errors)`** — builds a formatted error widget
+  with a `QIcon::fromTheme("dialog-error")` icon, bold caption label (font size +1),
+  and an HTML `<ul>` bullet list of error messages. Margins are 16 px, spacing 12 px.
+
+For groups, `updateGroupEnergyStatsError` accumulates errors in `m_groupEnergyErrors`
+(deduplicated), so when multiple members fail, all error messages appear as separate
+bullet items.
+
+Error state is cleared in three situations:
+1. **Device switch** — `updateDevice()` clears both `m_energyError` and
+   `m_groupEnergyErrors`.
+2. **Successful single-device data** — `updateEnergyStats()` clears `m_energyError`.
+3. **Successful group data** — `updateGroupEnergyStats()` clears `m_groupEnergyErrors`.
+
+When updating an existing error display (e.g. a second group member fails), the methods
+detect the framed container structure, remove and delete the old error widget from the
+inner layout, and insert a freshly built one — avoiding a full tab teardown/rebuild.
+
 ---
 
 ## Stacked Energy History Bar Chart for Groups
@@ -578,6 +620,13 @@ vertically so the total bar height equals the sum of all member contributions.
 | `m_groupHistoryMode` | `bool` | True when the last-shown energy history was a group chart |
 | `m_lastGroupMemberStats` | `QList<QPair<QString,DeviceBasicStats>>` | Cached per-member stats, used for resolution changes |
 | `m_memberDevices` | `FritzDeviceList` | Member device objects (name lookup for bar labels) |
+
+### ChartWidget state for energy history error display
+
+| Member | Type | Purpose |
+|---|---|---|
+| `m_energyError` | `QString` | Current error message for single-device energy stats; cleared on device switch or successful data arrival |
+| `m_groupEnergyErrors` | `QStringList` | Accumulated error messages for group members; cleared on device switch or successful data arrival |
 
 ### ChartWidget state for group energy pie chart
 

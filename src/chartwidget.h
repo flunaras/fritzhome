@@ -89,6 +89,14 @@ public:
     /// History tab with a stacked bar chart (one colour per member).
     void updateGroupEnergyStats(const QList<QPair<QString, DeviceBasicStats>> &memberStats);
 
+    /// Called by MainWindow when an error occurs fetching energy stats for the
+    /// currently selected device. Updates the placeholder with error message(s).
+    void updateEnergyStatsError(const QString &error);
+
+    /// Called by MainWindow when an error occurs fetching energy stats for a
+    /// group member. Updates the placeholder with accumulated error message(s).
+    void updateGroupEnergyStatsError(const QString &memberName, const QString &error);
+
     /// Returns the grid interval (in seconds) of the currently displayed energy
     /// history view: 900 (15-min / 24 h), 86400 (daily), 2678400 (monthly), or
     /// 0 if no energy history tab has been built yet.
@@ -219,6 +227,10 @@ private:
     // Group energy history mode
     bool        m_groupHistoryMode       = false;  ///< true when Energy History shows a stacked group chart
     QList<QPair<QString, DeviceBasicStats>> m_lastGroupMemberStats;  ///< cached member stats for rebuild
+    QStringList m_groupEnergyErrors;              ///< accumulated error messages for group members
+
+    // Energy history error tracking
+    QString     m_energyError;                    ///< current error message for single-device energy stats
 
     // Optional pie chart showing group member energy distribution
     QTCHARTS_NS QPieSeries *m_groupEnergyPie = nullptr;
