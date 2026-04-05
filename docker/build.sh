@@ -2,15 +2,19 @@
 # build.sh — Build fritzhome inside a Docker container for openSUSE Leap / Ubuntu.
 #
 # Usage:
-#   ./docker/build.sh [--distro <alias>|all]
+#   ./docker/build.sh [--distro <alias>|all] [--build-type Release|Debug]
 #
-# Available aliases:
+# Available distro aliases:
 #   opensuse-leap-15.6-x86_64    openSUSE Leap 15.6,  x86_64,  Qt5-only
 #   opensuse-leap-16.0-x86_64    openSUSE Leap 16.0,  x86_64,  Qt6 + KF6
 #   opensuse-tumbleweed-x86_64   openSUSE Tumbleweed, x86_64,  Qt6 + KF6
 #   opensuse-tumbleweed-aarch64  openSUSE Tumbleweed, aarch64, Qt6 + KF6 (cross-compiled)
 #   ubuntu-24.04-x86_64          Ubuntu 24.04,         x86_64,  Qt6-only
 #   all                          Build all of the above (default)
+#
+# Build type options (default: Release):
+#   Release                      Optimized build. Suitable for deployment.
+#   Debug                        Debug symbols, qDebug output enabled. For debugging and development.
 #
 # The script:
 #   1. Builds (or reuses) a Docker image from docker/Dockerfile.<dockerfile-name>
@@ -36,6 +40,7 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
 DISTRO="all"
+BUILD_TYPE="Release"
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -46,6 +51,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --distro=*)
             DISTRO="${1#*=}"
+            shift
+            ;;
+        --build-type)
+            BUILD_TYPE="$2"
+            shift 2
+            ;;
+        --build-type=*)
+            BUILD_TYPE="${1#*=}"
             shift
             ;;
         -h|--help)
@@ -72,6 +85,17 @@ case "$DISTRO" in
         echo "  opensuse-leap-15.6-x86_64, opensuse-leap-16.0-x86_64," >&2
         echo "  opensuse-tumbleweed-x86_64, opensuse-tumbleweed-aarch64," >&2
         echo "  ubuntu-24.04-x86_64, all" >&2
+        exit 1
+        ;;
+esac
+
+# Normalize build type to canonical form (case-insensitive input)
+BUILD_TYPE_LOWER="${BUILD_TYPE,,}"  # bash 4+: convert to lowercase
+case "$BUILD_TYPE_LOWER" in
+    release) BUILD_TYPE="Release" ;;
+    debug)   BUILD_TYPE="Debug" ;;
+    *)
+        echo "ERROR: --build-type must be Release or Debug (got: $BUILD_TYPE)" >&2
         exit 1
         ;;
 esac
@@ -218,6 +242,7 @@ build_for_distro() {
     echo "      Source  : ${PROJECT_ROOT}  →  /src  (read-only)"
     echo "      Build   : ${build_dir}  →  /build  (writable)"
     echo "      User    : $(id -u):$(id -g)"
+    echo "      Build type: ${BUILD_TYPE}"
 
     docker run --rm \
         --user "$(id -u):$(id -g)" \
@@ -232,7 +257,7 @@ build_for_distro() {
             # Remove stale CMakeCache to prevent cached package paths from a previous
             # (possibly failed) configure from poisoning this run.
             rm -f /build/CMakeCache.txt
-            cmake_args=(/src -B /build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCPACK_GENERATOR=${pkg_type})
+            cmake_args=(/src -B /build -G Ninja -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -DCPACK_GENERATOR=${pkg_type})
             [[ -n '${use_kf_flag}' ]] && cmake_args+=('${use_kf_flag}')
             [[ -n '${toolchain_flag}' ]] && cmake_args+=('${toolchain_flag}')
             [[ -n '${qt_host_path_flags}' ]] && cmake_args+=(${qt_host_path_flags})

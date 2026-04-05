@@ -83,16 +83,24 @@ This limits the blast radius if the credentials are ever compromised: a Smart Ho
 Docker build images are provided for each supported distribution. No local Qt or KDE packages are required on the host — only Docker.
 
 ```bash
-# Build for all distros
+# Build for all distros (Release, default)
 ./docker/build.sh --distro all
 
-# Build for a specific distro
+# Build for a specific distro (Release, default)
 ./docker/build.sh --distro opensuse-leap-15.6-x86_64
 ./docker/build.sh --distro opensuse-leap-16.0-x86_64
 ./docker/build.sh --distro opensuse-tumbleweed-x86_64
 ./docker/build.sh --distro opensuse-tumbleweed-aarch64
 ./docker/build.sh --distro ubuntu-24.04-x86_64
+
+# Build with Debug symbols and qDebug output enabled
+./docker/build.sh --distro opensuse-tumbleweed-x86_64 --build-type Debug
+./docker/build.sh --distro ubuntu-24.04-x86_64 --build-type Debug
 ```
+
+**Build type options** (default: `Release`):
+- `Release` — Optimized build, suitable for deployment. Disables debug output and assertions.
+- `Debug` — Includes debug symbols and enables `qDebug()` output (useful for troubleshooting). Binaries are larger and slower but provide detailed runtime logging.
 
 The resulting binaries and packages are placed in a hierarchical directory tree under `out/`:
 
@@ -123,7 +131,7 @@ Package filenames follow distribution conventions (RPM: `name-version-release.ar
 ### Manual build (no Docker)
 
 ```bash
-# openSUSE Leap 15.6 — Qt5 only, no KDE Frameworks
+# openSUSE Leap 15.6 — Qt5 only, no KDE Frameworks (Release)
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DUSE_KF=0
 ninja -C build
 
@@ -133,6 +141,10 @@ ninja -C build
 
 # With KDE Frameworks 6 (requires KDE:Extra OBS repo on Leap 16.0)
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DUSE_KF=6
+ninja -C build
+
+# Debug build (with symbols and qDebug output)
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DUSE_KF=6
 ninja -C build
 ```
 
