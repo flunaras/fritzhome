@@ -560,6 +560,9 @@ msgstr "Rollierender Monat"
 msgid "Last 2 years"
 msgstr "Letzte 2 Jahre"
 
+msgid "No energy data available for %1 yet.\nData will appear as it becomes available from Fritz!Box."
+msgstr "Keine Energiedaten für %1 verfügbar.\nDaten werden angezeigt, sobald sie von der Fritz!Box verfügbar sind."
+
 # ── Fritz!Box API error messages ──────────────────────────────────────────────
 msgid "No host configured"
 msgstr "Kein Host konfiguriert"

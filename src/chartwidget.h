@@ -98,6 +98,7 @@ private:
     void buildEnergyGauge(const FritzDevice &dev);
     void buildEnergyHistoryChart(const DeviceBasicStats &stats);
     void buildEnergyHistoryChartStacked(const QList<QPair<QString, DeviceBasicStats>> &memberStats);
+    void buildEnergyHistoryPlaceholder(const QStringList &viewLabels, int selectedIdx);
 
     // -- time-window helpers (for rolling-poll charts) -----------------------
     /// Returns the selected window duration in milliseconds.
@@ -199,6 +200,7 @@ private:
     QComboBox  *m_energyResCombo         = nullptr;  ///< resolution selector inside the tab
     QTCHARTS_NS QChartView *m_energyChartView = nullptr;  ///< chart view for mouse-event forwarding (tooltip fix)
     DeviceBasicStats m_lastEnergyStats;            ///< latest stats for rebuild (single-device mode)
+    int         m_lastAvailableGrids     = 0;  ///< bitmask of available grids in last build (0=900, 1=86400, 2=2678400)
 
     // Group energy history mode
     bool        m_groupHistoryMode       = false;  ///< true when Energy History shows a stacked group chart

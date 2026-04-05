@@ -746,6 +746,12 @@ und passt sich nicht mehr automatisch an neue Daten oder
         <source>Last 2 years</source>
         <translation>Letzte 2 Jahre</translation>
     </message>
+    <message>
+        <source>No energy data available for %1 yet.
+Data will appear as it becomes available from Fritz!Box.</source>
+        <translation>Keine Energiedaten für %1 verfügbar.
+Daten werden angezeigt, sobald sie von der Fritz!Box verfügbar sind.</translation>
+    </message>
 
     <!-- ── Fritz!Box API error messages ──────────────────────────────────── -->
     <message>

@@ -892,19 +892,52 @@ static QList<double> groupEnergyValuesForGrid(
     return combined;
 }
 
+// Compute a bitmask indicating which energy grids are available (non-empty) in stats.
+// Bit 0 = grid 900, Bit 1 = grid 86400, Bit 2 = grid 2678400.
+// Returns 0 if no grids are available.
+static int computeAvailableGrids(const DeviceBasicStats &stats)
+{
+    int availableGrids = 0;
+    for (const StatSeries &s : stats.energy) {
+        if (s.grid == 900 && !s.values.isEmpty())
+            availableGrids |= (1 << 0);
+        if (s.grid == 86400 && !s.values.isEmpty())
+            availableGrids |= (1 << 1);
+        if (s.grid == 2678400 && !s.values.isEmpty())
+            availableGrids |= (1 << 2);
+    }
+    return availableGrids;
+}
+
+// Compute a bitmask for group member stats: returns non-zero if ANY member has each grid.
+static int computeAvailableGridsForGroup(
+    const QList<QPair<QString, DeviceBasicStats>> &memberStats)
+{
+    int availableGrids = 0;
+    for (const auto &pair : memberStats)
+        availableGrids |= computeAvailableGrids(pair.second);
+    return availableGrids;
+}
+
 void ChartWidget::updateEnergyStats(const DeviceBasicStats &stats)
 {
-    // Skip the full tab rebuild when the 15-min view is active and the
-    // grid=900 values haven't changed since the last build.
-    // Skip the full tab rebuild when the displayed grid's values haven't changed.
+    // Compute which grids are available in the new stats
+    int currentAvailableGrids = computeAvailableGrids(stats);
+
+    // Skip the full tab rebuild when:
+    // 1. The displayed grid's values haven't changed, AND
+    // 2. The set of available grids hasn't changed (no new data)
+    // This prevents the UI from rebuilding when partial data is already showing.
     if (m_activeEnergyGrid > 0
             && energyValuesForGrid(stats, m_activeEnergyGrid)
-               == energyValuesForGrid(m_lastEnergyStats, m_activeEnergyGrid)) {
+               == energyValuesForGrid(m_lastEnergyStats, m_activeEnergyGrid)
+            && currentAvailableGrids == m_lastAvailableGrids) {
         m_lastEnergyStats = stats;   // still update cache (fetchTime etc. may differ)
         return;
     }
 
     m_lastEnergyStats = stats;
+    m_lastAvailableGrids = currentAvailableGrids;
 
     if (!m_device.hasEnergyMeter())
         return;
@@ -949,10 +982,17 @@ void ChartWidget::updateEnergyStats(const DeviceBasicStats &stats)
 
 void ChartWidget::updateGroupEnergyStats(const QList<QPair<QString, DeviceBasicStats>> &memberStats)
 {
-    // Skip rebuild when the displayed grid's values haven't changed.
+    // Compute which grids are available in the new member stats
+    int currentAvailableGrids = computeAvailableGridsForGroup(memberStats);
+
+    // Skip rebuild when:
+    // 1. The displayed grid's values haven't changed, AND
+    // 2. The set of available grids hasn't changed (no new data)
+    // This prevents the UI from rebuilding when partial data is already showing.
     if (m_activeEnergyGrid > 0
             && groupEnergyValuesForGrid(memberStats, m_activeEnergyGrid)
-               == groupEnergyValuesForGrid(m_lastGroupMemberStats, m_activeEnergyGrid)) {
+               == groupEnergyValuesForGrid(m_lastGroupMemberStats, m_activeEnergyGrid)
+            && currentAvailableGrids == m_lastAvailableGrids) {
         m_lastGroupMemberStats = memberStats;
         m_groupHistoryMode     = true;
         return;
@@ -960,6 +1000,7 @@ void ChartWidget::updateGroupEnergyStats(const QList<QPair<QString, DeviceBasicS
 
     m_lastGroupMemberStats = memberStats;
     m_groupHistoryMode     = true;
+    m_lastAvailableGrids   = currentAvailableGrids;
 
     if (!m_device.hasEnergyMeter())
         return;
@@ -1536,6 +1577,67 @@ void ChartWidget::buildEnergyGauge(const FritzDevice &dev)
 }
 
 // ---------------------------------------------------------------------------
+// Energy History — placeholder when selected view has no data yet
+// ---------------------------------------------------------------------------
+
+void ChartWidget::buildEnergyHistoryPlaceholder(const QStringList &viewLabels,
+                                                 int selectedIdx)
+{
+    QLabel *noDataMsg = new QLabel(
+        i18n("No energy data available for %1 yet.\nData will appear as it becomes available from Fritz!Box.",
+             viewLabels.value(selectedIdx)), this);
+    noDataMsg->setAlignment(Qt::AlignCenter);
+    noDataMsg->setWordWrap(true);
+
+    QComboBox *combo = new QComboBox();
+    for (const QString &label : viewLabels)
+        combo->addItem(label);
+    combo->setCurrentIndex(selectedIdx);
+
+    QWidget *comboOverlay = new QWidget();
+    comboOverlay->setAttribute(Qt::WA_TransparentForMouseEvents, false);
+    comboOverlay->setMouseTracking(true);
+    comboOverlay->setStyleSheet("background: transparent;");
+    {
+        QVBoxLayout *vl = new QVBoxLayout(comboOverlay);
+        vl->setContentsMargins(6, 4, 0, 0);
+        vl->setSpacing(0);
+        QHBoxLayout *hl = new QHBoxLayout();
+        hl->setSpacing(4);
+        QLabel *viewLabel = new QLabel(i18n("View:"));
+        viewLabel->setStyleSheet("background: transparent;");
+        hl->addWidget(viewLabel);
+        combo->setStyleSheet("QComboBox { background: palette(button); }");
+        hl->addWidget(combo);
+        hl->addStretch();
+        vl->addLayout(hl);
+        vl->addStretch();
+    }
+
+    QWidget *container = new QWidget();
+    container->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    QStackedLayout *stack = new QStackedLayout(container);
+    stack->setStackingMode(QStackedLayout::StackAll);
+    stack->addWidget(noDataMsg);
+    stack->addWidget(comboOverlay);
+    comboOverlay->raise();
+
+    m_energyHistoryTabIndex = m_tabs->insertTab(
+        m_energyHistoryTabIndex >= 0 ? m_energyHistoryTabIndex : m_tabs->count(),
+        container, i18n("Energy History"));
+
+    m_energyResCombo = combo;
+    m_energyChartView = nullptr;
+    // m_activeEnergyGrid intentionally left unchanged (stays 0 on first call).
+    // The skip-rebuild guards in updateEnergyStats() / updateGroupEnergyStats()
+    // check "m_activeEnergyGrid > 0" first, so a placeholder state always
+    // triggers a full rebuild when new data arrives.
+
+    connect(combo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &ChartWidget::onEnergyResolutionChanged);
+}
+
+// ---------------------------------------------------------------------------
 // Energy History chart (getbasicdevicestats)
 // ---------------------------------------------------------------------------
 
@@ -1573,17 +1675,18 @@ void ChartWidget::buildEnergyHistoryChart(const DeviceBasicStats &stats)
         return;
     }
 
-    // Build the list of available views dynamically
+    // Build the list of available views dynamically.
+    // "Last 24 hours" is always included (even if no data yet), others only if data exists.
     struct ViewDef {
         const char       *label;
         int               bars;
-        const StatSeries *series;  // which series to read from
+        const StatSeries *series;  // which series to read from (nullptr if no data)
         int               grid;    // seconds per bar
     };
 
     QVector<ViewDef> views;
-    if (hourlySeries)
-        views.append({ QT_TR_NOOP("Last 24 hours"), 96, hourlySeries, 900 });
+    // Always include "Last 24 hours" even if no data (will show placeholder)
+    views.append({ QT_TR_NOOP("Last 24 hours"), 96, hourlySeries, 900 });
     if (dailySeries)
         views.append({ QT_TR_NOOP("Rolling month"), 31, dailySeries, 86400 });
     if (monthlySeries)
@@ -1592,6 +1695,15 @@ void ChartWidget::buildEnergyHistoryChart(const DeviceBasicStats &stats)
     const int nViews = views.size();
     int selectedIdx = qBound(0, m_energyResSelectedIdx, nViews - 1);
     const ViewDef &view = views[selectedIdx];
+
+    // If the selected view has no data, show a placeholder message
+    if (!view.series) {
+        QStringList labels;
+        for (int i = 0; i < nViews; ++i)
+            labels << i18n(views[i].label);
+        buildEnergyHistoryPlaceholder(labels, selectedIdx);
+        return;
+    }
 
     // ---- Build bar labels and values ----
     // series->values are newest-first; bar 0 = most recent completed period.
@@ -2142,19 +2254,30 @@ void ChartWidget::buildEnergyHistoryChartStacked(
     }
 
     // ---- Build view list ----
+    // "Last 24 hours" is always included (even if no data yet), others only if data exists.
     struct ViewDef {
         const char *label;
         int         bars;
         int         grid;
+        bool        hasData;  // whether this view has data
     };
     QVector<ViewDef> views;
-    if (has900)     views.append({ QT_TR_NOOP("Last 24 hours"), 96,  900 });
-    if (has86400)   views.append({ QT_TR_NOOP("Rolling month"),  31, 86400 });
-    if (has2678400) views.append({ QT_TR_NOOP("Last 2 years"),   24, 2678400 });
+    views.append({ QT_TR_NOOP("Last 24 hours"), 96,  900, has900 });
+    if (has86400)   views.append({ QT_TR_NOOP("Rolling month"),  31, 86400, true });
+    if (has2678400) views.append({ QT_TR_NOOP("Last 2 years"),   24, 2678400, true });
 
     const int nViews     = views.size();
     int selectedIdx      = qBound(0, m_energyResSelectedIdx, nViews - 1);
     const ViewDef &view  = views[selectedIdx];
+
+    // If the selected view has no data, show a placeholder message
+    if (!view.hasData) {
+        QStringList labels;
+        for (int i = 0; i < nViews; ++i)
+            labels << i18n(views[i].label);
+        buildEnergyHistoryPlaceholder(labels, selectedIdx);
+        return;
+    }
 
     // ---- Build shared category / tooltip lists ----
     // Category / tooltip logic is identical to the single-device builder; the
