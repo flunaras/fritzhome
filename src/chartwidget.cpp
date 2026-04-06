@@ -716,12 +716,15 @@ static QWidget *makeChartTab(QChart *chart, const QString &currentValueText,
     // so it doesn't create a full-size sibling that would eat mouse events.
     if (lockCheckBox) {
         lockCheckBox->setParent(chartStack);
+        lockCheckBox->adjustSize();
         lockCheckBox->show();
         // Position it bottom-left (6 px margin) initially, and reposition on every resize.
         auto positionCb = [lockCheckBox, chartStack]() {
+            lockCheckBox->adjustSize();
             QSize cs = chartStack->size();
             QSize ls = lockCheckBox->sizeHint();
             lockCheckBox->move(6, cs.height() - ls.height() - 6);
+            lockCheckBox->raise();
         };
         positionCb();
         // Use a plain QObject event-filter lambda via a helper class
@@ -729,12 +732,14 @@ static QWidget *makeChartTab(QChart *chart, const QString &currentValueText,
             QCheckBox *cb;
             ResizeFilter(QCheckBox *c, QObject *parent) : QObject(parent), cb(c) {}
             bool eventFilter(QObject *, QEvent *e) override {
-                if (e->type() == QEvent::Resize) {
+                if (e->type() == QEvent::Resize || e->type() == QEvent::Show) {
                     QWidget *p = qobject_cast<QWidget*>(parent());
                     if (p) {
+                        cb->adjustSize();
                         QSize cs = p->size();
                         QSize ls = cb->sizeHint();
                         cb->move(6, cs.height() - ls.height() - 6);
+                        cb->raise();
                     }
                 }
                 return false;
