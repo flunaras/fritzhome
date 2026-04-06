@@ -25,6 +25,7 @@ Communicates directly with the Fritz!Box router over the local network using the
 
 - **Live charts** (Temperature, Power, Humidity, Energy gauge, Energy history with configurable resolution; bar chart shows hover tooltips with date/value, and the most recent bar is visually dimmed to indicate an incomplete accumulation period; group devices show a **stacked energy history bar chart** with one colour-coded bar segment per member device, a **stacked per-member power chart**, and a **multi-line temperature chart** with one line per temperature-capable member). For groups the Energy tab also shows a **per-member pie chart** summarising each member's share of total energy; slice labels show both absolute and percentage values, with overlap-aware visibility that hides labels of small neighbouring slices; hovering a slice explodes it and shows a tooltip with its details.
 - **Configurable polling interval** (2 – 300 s), shown below the device tree
+- **Efficient network usage** — response caching (TTL-based) and request deduplication minimise traffic to the Fritz!Box
 - **Automatic login** — optional checkbox in the Connect dialog; skips the dialog on next launch if stored credentials are available
 - **Secure password storage** via KWallet (KDE) or libsecret/GNOME keyring
 - **Persistent UI state** — window geometry, splitter and column widths, chart slider position, and zoom level survive restarts
@@ -182,7 +183,7 @@ Without `--password`, a login dialog is shown at startup. Credentials are stored
 src/
 ├── main.cpp                    Entry point, CLI parsing, QApplication / KApplication init, QTranslator setup
 ├── fritzdevice.h               All device data structs (FritzDevice, stats sub-structs, FunctionMask)
-├── fritzapi.{h,cpp}            REST API client — login (pbkdf2/md5), polling, all set-commands, JSON parsing
+├── fritzapi.{h,cpp}            REST API client — login (pbkdf2/md5), polling, async caching, deduplication, JSON parsing
 ├── mainwindow.{h,cpp}          Top-level window, device tree, panel switching
 ├── loginwindow.{h,cpp}         Connection-settings dialog (host, username, password, ignore-TLS option)
 ├── devicemodel.{h,cpp}         QAbstractItemModel for the two-level grouped device tree

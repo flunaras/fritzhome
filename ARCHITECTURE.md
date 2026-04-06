@@ -30,7 +30,7 @@ src/
 ├── loginwindow.h / .cpp         Modal credentials dialog (host, username, password, auto-login)
 │
 ├── fritzdevice.h                Plain data structs: FritzDevice, all *Stats
-├── fritzapi.h / .cpp            Network layer — Fritz!Box Smart Home REST API client
+├── fritzapi.h / .cpp            Network layer — Fritz!Box Smart Home REST API client (async, cached, deduplicated)
 │
 ├── devicemodel.h / .cpp         QAbstractItemModel — 2-level tree model
 ├── devicewidget.h / .cpp        Abstract base for all control panels
@@ -259,32 +259,79 @@ login()
   │
 startPolling(intervalMs)
   └─► QTimer fires onPollTimer() every interval
-          └─► fetchDeviceList()  [only if isLoggedIn()]
-                  └─► GET /api/v0/smarthome/overview  [Authorization: AVM-SID {sid}]
-                          └─► onDeviceListReply()
-                                  ├── HTTP 401 → handleSessionExpiry()  ← session expired
-                                  │       ├── reset SID to "000…"
-                                  │       ├── emit sessionExpired()       ← silent UI update
-                                  │       └── login()                     ← automatic re-login
-                                  ├── parseDeviceListJson() → FritzDeviceList
-                                  └── emit deviceListUpdated(devices)
+          └─► fetchDeviceList()  [backward-compat overload, only if isLoggedIn()]
+                  └─► fetchDeviceList(successCb, errorCb)  [async + cache + dedup]
+                          ├── cache hit   → successCb(cachedDevices) immediately
+                          ├── in-flight   → queue callback, share pending request
+                          └── cache miss  → GET /api/v0/smarthome/overview
+                                  └─► onAsyncReply(cacheKey, false, "")
+                                          ├── HTTP 401 → handleSessionExpiry()
+                                          ├── cache response data + timestamp
+                                          ├── parseDeviceListJson() → FritzDeviceList
+                                          ├── carry history forward from previous poll
+                                          └── invoke all queued callbacks
 
-fetchDeviceStats(ain)
-  └─► GET /api/v0/smarthome/overview/units/{unitUID}  [Authorization: AVM-SID {sid}]
-          └─► onDeviceStatsReply()
-                  ├── HTTP 401 → handleSessionExpiry()
-                  ├── network error → emit networkError(error)
-                  │                   emit deviceStatsError(ain, error)
-                  ├── parseUnitStatsJson() → DeviceBasicStats
-                  └── emit deviceStatsUpdated(ain, stats)
+fetchDeviceStats(ain)  [backward-compat overload]
+  └─► fetchDeviceStats(ain, successCb, errorCb)  [async + cache + dedup]
+          ├── cache hit   → successCb(cachedStats) immediately
+          ├── in-flight   → queue callback, share pending request
+          └── cache miss  → GET /api/v0/smarthome/overview/units/{unitUID}
+                  └─► onAsyncReply(cacheKey, true, ain)
+                          ├── HTTP 401 → handleSessionExpiry()
+                          ├── parseUnitStatsJson() → DeviceBasicStats
+                          ├── stats.valid → cache response data + timestamp,
+                          │                 update device's basicStats
+                          ├── !stats.valid → remove cache entry (no caching)
+                          └── invoke all queued callbacks
 
 setSwitchOn/Off/Toggle, setThermostatTarget, setLevel, setColor, setBlind, …
   └─► putUnitInterfaces() → PUT /api/v0/smarthome/overview/units/{unitUID}
-          └─► onCommandReply()                  [JSON body: {"interfaces": {…}}]
-                  ├── HTTP 401 → handleSessionExpiry()  ← session expired
+          └─► [lambda reply handler]           [JSON body: {"interfaces": {…}}]
+                  ├── HTTP 401 → handleSessionExpiry()
                   ├── success  → emit commandSuccess(ain, cmd)
+                  │               clearAllCaches()
+                  │               QTimer::singleShot(500) → fetchDeviceList()
                   └── failure  → emit commandFailed(ain, error)
 ```
+
+### Response caching and request deduplication
+
+`FritzApi` implements a TTL-based response cache with request deduplication to minimise
+network traffic to the Fritz!Box:
+
+**Cache structure:**  `QMap<QString, CacheEntry> m_cache` where each `CacheEntry` holds:
+- `data` — raw JSON response bytes
+- `timestamp` — when the response was received
+- `ttlSeconds` — validity duration (2 s for device list, 5 s for device stats)
+- `pendingReply` — non-null pointer to in-flight `QNetworkReply` (dedup sentinel)
+- `deviceListCallbacks` / `deviceStatsCallbacks` — queued callback pairs
+
+**Request flow (e.g. `fetchDeviceList(onSuccess, onError)`):**
+
+1. **Cache hit:** if `isCacheValid(entry)` returns true (data non-empty, age < TTL),
+   the cached JSON is re-parsed and `onSuccess` is invoked synchronously.
+2. **In-flight dedup:** if `entry.pendingReply != nullptr`, the request is already
+   in progress — `{onSuccess, onError}` is appended to the callback queue and no new
+   network request is started.
+3. **Cache miss:** a new `GET` is issued, the `CacheEntry` is initialised with
+   `pendingReply` set, and the callback pair is queued. When the reply finishes,
+   `onAsyncReply()` stores the response in the cache, invokes **all** queued callbacks,
+   and clears the callback lists.
+
+**Signal emission:** `onAsyncReply` does not emit any signals directly. All signal
+emission (e.g. `deviceListUpdated`, `networkError`) is the responsibility of the
+callbacks registered by callers. The backward-compatible `fetchDeviceList()` and
+`fetchDeviceStats(ain)` overloads register callbacks that emit the legacy signals.
+The `fetchDeviceStats(ain)` backward-compat overload emits `deviceStatsUpdated` when
+`stats.valid` is true, or `deviceStatsError` when it is false (e.g. the Fritz!Box
+returned an empty `statistics` object). This ensures the UI always receives either a
+success or error signal — no silent drops.
+
+**Cache invalidation:** `clearAllCaches()` / `invalidateAllCaches()` empties the entire
+cache. This is called after every successful command (`putUnitInterfaces`) to ensure the
+next poll picks up fresh state from the Fritz!Box. Additionally, device stats responses
+that parse with `stats.valid == false` are never stored in the cache; the cache entry is
+removed so the next `fetchDeviceStats` call for that AIN retries from the network.
 
 ### Session expiry and automatic re-login
 
@@ -466,6 +513,13 @@ recreates the combo with items and signal wiring from scratch.
 - **Y-axis units:** the "Last 24 hours" (grid=900) view always uses Wh to prevent the
   Y-axis labels collapsing to `"0.0 kWh"` when per-slot values are small (< 1 kWh).
   Daily and monthly views auto-switch to kWh when the window total ≥ 1000 Wh.
+- **All-zero / all-NaN fallback:** when every bar value in the selected view is zero
+  (which includes the case where all original API values were NaN — e.g. device was
+  unreachable for the entire period), both `buildEnergyHistoryChart` and
+  `buildEnergyHistoryChartStacked` fall back to `buildEnergyHistoryPlaceholder` instead
+  of rendering invisible zero-height bars. The placeholder shows a "No energy data
+  available for {view} yet" message with the view selector combo, matching the existing
+  placeholder style for views with no series data.
 - **Animations:** disabled for all energy history views (`QChart::NoAnimation`, the default
   from `makeBaseChart`). The "grow from zero" effect on bar rebuilds is distracting.
 - **No-op refresh guard:** `updateEnergyStats` and `updateGroupEnergyStats` compare the
@@ -475,8 +529,11 @@ recreates the combo with items and signal wiring from scratch.
   resolutions (900 / 86400 / 2678400).
 - **Refresh throttle:** `MainWindow::onDeviceListUpdated` uses a 60-second throttle for
   `fetchDeviceStats` when `ChartWidget::activeEnergyGrid() == 900` (the 15-min view),
-  and a 5-minute throttle otherwise, via the public `activeEnergyGrid()` accessor on
-  `ChartWidget`.
+  a 5-minute throttle for daily/monthly views, and a 30-second throttle when
+  `activeEnergyGrid() == 0` (placeholder state — no chart built yet), via the public
+  `activeEnergyGrid()` accessor on `ChartWidget`. The shorter placeholder throttle
+  ensures the chart populates quickly after the first stats fetch, even if the initial
+  response was invalid.
 - **"Last 24 hours" hourly view (index 0):** uses the `grid=900` (15-minute) energy series.
   Available via the REST API (`GET /smarthome/overview/units/{unitUID}`, `statistics.energies[]`
   with `interval=900`).  Displays up to 96 bars (96 × 900 s = 24 h), oldest-left /
@@ -576,6 +633,36 @@ When updating an existing error display (e.g. a second group member fails), the 
 detect the framed container structure, remove and delete the old error widget from the
 inner layout, and insert a freshly built one — avoiding a full tab teardown/rebuild.
 
+### Fritz!Box `statisticsState` propagation
+
+The Fritz!Box REST API includes a `statisticsState` field in each statistics array
+entry (energies, powers, temperatures, voltages).  Known values:
+
+| State          | Meaning                                                |
+|----------------|--------------------------------------------------------|
+| `"valid"`      | Data is available (`interval`, `period`, `values` present) |
+| `"unknown"`    | Device statistics not yet available (recently added/reset) |
+| `"notConnected"` | Device is offline / unreachable                       |
+
+When all energy series entries have a non-`"valid"` state and no usable data,
+`parseUnitStatsJson` captures the first non-`"valid"` state in
+`DeviceBasicStats::energyStatsState`.  This field propagates through the success
+signal path (`deviceStatsUpdated` → `updateEnergyStats` → `buildEnergyHistoryChart`)
+because the stats are technically valid (the JSON parsed correctly) — they just lack
+energy data.
+
+`buildEnergyHistoryChart` and `buildEnergyHistoryChartStacked` use
+`energyStatsState` in their all-series-null early returns to display a context-aware
+message:
+
+- `"notConnected"` → "Device is not connected — statistics are unavailable."
+- `"unknown"` → "Statistics for this device are not yet available."
+- Other states → raw state value shown as fallback
+- Empty (no statistics object / no energies array) → generic "No energy history available"
+
+For group charts, the stacked builder collects `energyStatsState` from each member
+and lists the per-member reasons (e.g. "Wohnzimmer 1: device not connected").
+
 ---
 
 ## Stacked Energy History Bar Chart for Groups
@@ -627,6 +714,35 @@ vertically so the total bar height equals the sum of all member contributions.
 |---|---|---|
 | `m_energyError` | `QString` | Current error message for single-device energy stats; cleared on device switch or successful data arrival |
 | `m_groupEnergyErrors` | `QStringList` | Accumulated error messages for group members; cleared on device switch or successful data arrival |
+
+### ChartWidget state for energy history skip-rebuild guard
+
+| Member | Type | Purpose |
+|---|---|---|
+| `m_activeEnergyGrid` | `int` | Grid of the currently displayed energy history view (900 / 86400 / 2678400); 0 = no chart built (placeholder or no-data state) |
+| `m_lastEnergyStats` | `DeviceBasicStats` | Cached stats from the last successful single-device chart build; used for same-data comparison |
+| `m_lastAvailableGrids` | `int` | Bitmask of available grids in the last build (bit 0 = 900, bit 1 = 86400, bit 2 = 2678400); 0 = none |
+
+`updateEnergyStats` and `updateGroupEnergyStats` skip the expensive chart
+teardown-and-rebuild when `m_activeEnergyGrid > 0` and the incoming data for that
+grid matches the cached copy.  This guard relies on `m_activeEnergyGrid` being reset
+to 0 whenever the chart enters a non-chart state, so that the next stats arrival
+always triggers a full rebuild.
+
+**Reset points for `m_activeEnergyGrid`:**
+
+1. **`updateDevice`** — set to 0 (along with `m_lastAvailableGrids` and
+   `m_lastEnergyStats`) during the tab-clear/rebuild cycle.  Prevents stale values
+   from a previous device interfering with the skip guard on the new device.
+2. **`buildEnergyHistoryPlaceholder`** — set to 0 so that the placeholder state
+   is recognised as "no chart" by both the skip guard and the refresh throttle.
+3. **`buildEnergyHistoryChart` all-series-null early return** — set to 0 before
+   inserting the "No energy history" label, matching the placeholder semantics.
+4. **`buildEnergyHistoryChartStacked` all-series-null early return** — same as above
+   for the group chart path.
+5. **`buildEnergyHistoryChart` / `buildEnergyHistoryChartStacked` success path** —
+   set to the active view's grid value (900 / 86400 / 2678400) after the chart is
+   fully built.
 
 ### ChartWidget state for group energy pie chart
 
@@ -892,7 +1008,7 @@ rebuilt on every `rebuildMenus()` call so the dropdown always shows fresh state.
 
 **Physical devices:** `locked` and `deviceLocked` are populated directly from the
 `onOffInterface` block of the REST API response (`GET /api/v0/smarthome/overview`).
-`FritzApi::parseDeviceList()` assigns them at two sites: once for physical devices
+`FritzApi::parseDeviceListJson()` assigns them at two sites: once for physical devices
 (≈ line 482) and once for group member units (≈ line 629).
 
 **Groups:** The group unit's own `onOffInterface` in the JSON **does not carry**
@@ -1099,8 +1215,8 @@ All three are nulled / cleared in `updateDevice()` before each rebuild.
 ## Rolling History Retention
 
 Poll-driven history (`temperatureHistory`, `powerHistory`, `humidityHistory` on each
-`FritzDevice`) is trimmed on every `onDeviceListReply` call in `FritzApi` to keep only
-the last **24 hours**:
+`FritzDevice`) is trimmed on every successful device list response in `FritzApi::onAsyncReply()`
+to keep only the last **24 hours**:
 
 ```cpp
 const QDateTime cutoff = now.addSecs(-24 * 3600);

@@ -36,6 +36,27 @@ FritzApi::FritzApi(QObject *parent)
     connect(m_pollTimer, &QTimer::timeout, this, &FritzApi::onPollTimer);
 }
 
+// ---- Cache Management ----
+
+bool FritzApi::isCacheValid(const CacheEntry &entry) const
+{
+    if (entry.data.isEmpty())
+        return false;
+    QDateTime now = QDateTime::currentDateTime();
+    int ageSeconds = entry.timestamp.secsTo(now);
+    return ageSeconds < entry.ttlSeconds;
+}
+
+void FritzApi::clearAllCaches()
+{
+    m_cache.clear();
+}
+
+void FritzApi::invalidateAllCaches()
+{
+    clearAllCaches();
+}
+
 // ---- Network helpers ----
 
 // Private helper: issue a GET request and register the reply in
@@ -303,82 +324,180 @@ QString FritzApi::computePbkdf2Response(const QString &challengeLine) const
     return parts[4] + "$" + QString::fromLatin1(hash2.toHex());
 }
 
-// Kept for login SID URL building (still AHA-based)
-QUrl FritzApi::buildCommandUrl(const QString &command, const QString &ain) const
-{
-    QUrl url(m_host + "/webservices/homeautoswitch.lua");
-    QUrlQuery q;
-    q.addQueryItem("switchcmd", command);
-    q.addQueryItem("sid", m_sid);
-    if (!ain.isEmpty()) {
-        q.addQueryItem("ain", ain);
-    }
-    url.setQuery(q);
-    return url;
-}
-
 // ---- Device list (REST: GET /api/v0/smarthome/overview) ----
 
-void FritzApi::fetchDeviceList()
+void FritzApi::fetchDeviceList(DeviceListCallback onSuccess, ErrorCallback onError)
 {
+    if (!isLoggedIn()) {
+        if (onError)
+            onError(i18n("Not logged in"));
+        return;
+    }
+
+    const QString cacheKey = QStringLiteral("device-list");
+
+    // Check if we have valid cached data
+    if (m_cache.contains(cacheKey)) {
+        const CacheEntry &entry = m_cache.value(cacheKey);
+        if (isCacheValid(entry)) {
+            // Return cached data immediately (synchronously)
+            FritzDeviceList devices = parseDeviceListJson(entry.data);
+            onSuccess(devices);
+            return;
+        }
+    }
+
+    // Not cached or expired — check if request is already in-flight
+    if (m_cache.contains(cacheKey) && m_cache[cacheKey].pendingReply) {
+        // Request already in-flight, just queue the callback
+        m_cache[cacheKey].deviceListCallbacks.append({onSuccess, onError});
+        return;
+    }
+
+    // Start new network request
     QNetworkRequest req = buildRestRequest(QStringLiteral("/api/v0/smarthome/overview"));
     auto *reply = get(req);
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-        onDeviceListReply(reply);
+
+    // Initialize cache entry with pending request
+    CacheEntry &entry = m_cache[cacheKey];
+    entry.ttlSeconds = kDeviceListCacheTtl;
+    entry.pendingReply = reply;
+    entry.deviceListCallbacks.append({onSuccess, onError});
+
+    connect(reply, &QNetworkReply::finished, this, [this, cacheKey]() {
+        onAsyncReply(cacheKey, false, QString());
     });
 }
 
-void FritzApi::onDeviceListReply(QNetworkReply *reply)
+void FritzApi::onAsyncReply(const QString &cacheKey, bool isDeviceStats, const QString &ain)
 {
+    if (!m_cache.contains(cacheKey)) {
+        qWarning() << "onAsyncReply: cache entry not found for key" << cacheKey;
+        return;
+    }
+
+    CacheEntry &entry = m_cache[cacheKey];
+    QNetworkReply *reply = entry.pendingReply;
+
+    if (!reply) {
+        qWarning() << "onAsyncReply: no pending reply found";
+        return;
+    }
+
     reply->deleteLater();
+    entry.pendingReply = nullptr;
+
     if (reply->error() != QNetworkReply::NoError) {
         // HTTP 401 means session expired
         int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         if (httpStatus == 401) {
             handleSessionExpiry();
+            // Clear cache and notify all callbacks
+            if (isDeviceStats) {
+                for (auto &[cb, errCb] : entry.deviceStatsCallbacks) {
+                    if (errCb)
+                        errCb(i18n("Session expired"));
+                }
+            } else {
+                for (auto &[cb, errCb] : entry.deviceListCallbacks) {
+                    if (errCb)
+                        errCb(i18n("Session expired"));
+                }
+            }
+            m_cache.remove(cacheKey);
             return;
         }
-        if (reply->error() != QNetworkReply::OperationCanceledError)
-            emit networkError(reply->errorString());
+
+        QString errorMsg = reply->errorString();
+
+        // Notify all waiting callbacks (callbacks are responsible for signal emission)
+        if (isDeviceStats) {
+            for (auto &[cb, errCb] : entry.deviceStatsCallbacks) {
+                if (errCb)
+                    errCb(errorMsg);
+            }
+        } else {
+            for (auto &[cb, errCb] : entry.deviceListCallbacks) {
+                if (errCb)
+                    errCb(errorMsg);
+            }
+        }
+        m_cache.remove(cacheKey);
         return;
     }
+
+    // Success! Cache the response and invoke all callbacks
     QByteArray data = reply->readAll();
 
-    FritzDeviceList fresh = parseDeviceListJson(data);
-
-    // Carry history forward from the previous poll into the freshly parsed devices
-    QDateTime now = QDateTime::currentDateTime();
-    for (FritzDevice &dev : fresh) {
-        for (const FritzDevice &old : m_devices) {
-            if (old.ain != dev.ain)
-                continue;
-
-            dev.temperatureHistory  = old.temperatureHistory;
-            dev.powerHistory        = old.powerHistory;
-            dev.humidityHistory     = old.humidityHistory;
-            dev.basicStats          = old.basicStats;
-
-            if (dev.hasTemperature() && dev.temperature > -273.0)
-                dev.temperatureHistory.append({now, dev.temperature});
-            if (dev.hasEnergyMeter() && dev.energyStats.valid)
-                dev.powerHistory.append({now, dev.energyStats.power});
-            if (dev.hasHumidity() && dev.humidityStats.valid)
-                dev.humidityHistory.append({now, static_cast<double>(dev.humidityStats.humidity)});
-
-            // Keep history bounded to the last 24 hours
-            const QDateTime cutoff = now.addSecs(-24 * 3600);
-            while (!dev.temperatureHistory.isEmpty() && dev.temperatureHistory.first().first < cutoff)
-                dev.temperatureHistory.removeFirst();
-            while (!dev.powerHistory.isEmpty() && dev.powerHistory.first().first < cutoff)
-                dev.powerHistory.removeFirst();
-            while (!dev.humidityHistory.isEmpty() && dev.humidityHistory.first().first < cutoff)
-                dev.humidityHistory.removeFirst();
-            break;
+    if (isDeviceStats) {
+        DeviceBasicStats stats = parseUnitStatsJson(data);
+        if (stats.valid) {
+            // Cache only valid stats responses; invalid ones (e.g. empty
+            // "statistics" object) must not be cached so the next request
+            // retries from the network instead of re-serving stale data.
+            entry.data = data;
+            entry.timestamp = QDateTime::currentDateTime();
+            for (FritzDevice &dev : m_devices) {
+                if (dev.ain == ain) {
+                    dev.basicStats = stats;
+                    break;
+                }
+            }
+        } else {
+            // Don't cache — remove the entry so the next fetch goes to the network.
+            // (We still invoke callbacks below before removing.)
         }
-    }
+        // Invoke all waiting callbacks (callbacks are responsible for signal emission)
+        for (auto &[cb, errCb] : entry.deviceStatsCallbacks) {
+            cb(stats);
+        }
+        entry.deviceStatsCallbacks.clear();
+        if (!stats.valid)
+            m_cache.remove(cacheKey);
+    } else {
+        entry.data = data;
+        entry.timestamp = QDateTime::currentDateTime();
+        FritzDeviceList fresh = parseDeviceListJson(data);
 
-    m_devices = fresh;
-    emit deviceListUpdated(m_devices);
+        // Carry history forward from the previous poll into the freshly parsed devices
+        QDateTime now = QDateTime::currentDateTime();
+        for (FritzDevice &dev : fresh) {
+            for (const FritzDevice &old : m_devices) {
+                if (old.ain != dev.ain)
+                    continue;
+
+                dev.temperatureHistory  = old.temperatureHistory;
+                dev.powerHistory        = old.powerHistory;
+                dev.humidityHistory     = old.humidityHistory;
+                dev.basicStats          = old.basicStats;
+
+                if (dev.hasTemperature() && dev.temperature > -273.0)
+                    dev.temperatureHistory.append({now, dev.temperature});
+                if (dev.hasEnergyMeter() && dev.energyStats.valid)
+                    dev.powerHistory.append({now, dev.energyStats.power});
+                if (dev.hasHumidity() && dev.humidityStats.valid)
+                    dev.humidityHistory.append({now, static_cast<double>(dev.humidityStats.humidity)});
+
+                // Keep history bounded to the last 24 hours
+                const QDateTime cutoff = now.addSecs(-24 * 3600);
+                while (!dev.temperatureHistory.isEmpty() && dev.temperatureHistory.first().first < cutoff)
+                    dev.temperatureHistory.removeFirst();
+                while (!dev.powerHistory.isEmpty() && dev.powerHistory.first().first < cutoff)
+                    dev.powerHistory.removeFirst();
+                while (!dev.humidityHistory.isEmpty() && dev.humidityHistory.first().first < cutoff)
+                    dev.humidityHistory.removeFirst();
+                break;
+            }
+        }
+
+        m_devices = fresh;
+
+        // Invoke all waiting callbacks (callbacks are responsible for signal emission)
+        for (auto &[cb, errCb] : entry.deviceListCallbacks) {
+            cb(m_devices);
+        }
+        entry.deviceListCallbacks.clear();
+    }
 }
 
 // ---- REST JSON device list parser ----
@@ -664,26 +783,167 @@ FritzDeviceList FritzApi::parseDeviceListJson(const QByteArray &json) const
     return devices;
 }
 
-// ---- Command reply handler ----
+// ---- Device stats (REST: GET /api/v0/smarthome/overview/units/{unitUID}) ----
 
-void FritzApi::onCommandReply(QNetworkReply *reply, const QString &ain, const QString &cmd)
+void FritzApi::fetchDeviceStats(const QString &ain, DeviceStatsCallback onSuccess, ErrorCallback onError)
 {
-    reply->deleteLater();
-    if (reply->error() != QNetworkReply::NoError) {
-        // HTTP 401 → session expired
-        int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        if (httpStatus == 401) {
-            handleSessionExpiry();
-            return;
-        }
-        if (reply->error() != QNetworkReply::OperationCanceledError)
-            emit commandFailed(ain, reply->errorString());
+    if (!isLoggedIn() || ain.isEmpty()) {
+        if (onError)
+            onError(i18n("Not logged in or empty AIN"));
         return;
     }
 
-    emit commandSuccess(ain, cmd);
-    // Refresh device list after command
-    QTimer::singleShot(500, this, &FritzApi::fetchDeviceList);
+    QString uid = unitUIDForAin(ain);
+    if (uid.isEmpty()) {
+        qWarning() << "fetchDeviceStats: no unitUID found for AIN" << ain;
+        if (onError)
+            onError(i18n("Unknown device AIN: %1", ain));
+        return;
+    }
+
+    const QString cacheKey = QStringLiteral("device-stats-") + ain;
+
+    // Check if we have valid cached data
+    if (m_cache.contains(cacheKey)) {
+        const CacheEntry &entry = m_cache.value(cacheKey);
+        if (isCacheValid(entry)) {
+            // Return cached data immediately (synchronously)
+            DeviceBasicStats stats = parseUnitStatsJson(entry.data);
+            onSuccess(stats);
+            return;
+        }
+    }
+
+    // Not cached or expired — check if request is already in-flight
+    if (m_cache.contains(cacheKey) && m_cache[cacheKey].pendingReply) {
+        // Request already in-flight, just queue the callback
+        m_cache[cacheKey].deviceStatsCallbacks.append({onSuccess, onError});
+        return;
+    }
+
+    // Start new network request
+    QString path = QStringLiteral("/api/v0/smarthome/overview/units/") + QString(QUrl::toPercentEncoding(uid));
+    QNetworkRequest req = buildRestRequest(path);
+    auto *reply = get(req);
+
+    // Initialize cache entry with pending request
+    CacheEntry &entry = m_cache[cacheKey];
+    entry.ttlSeconds = kDeviceStatsCacheTtl;
+    entry.pendingReply = reply;
+    entry.deviceStatsCallbacks.append({onSuccess, onError});
+
+    connect(reply, &QNetworkReply::finished, this, [this, cacheKey, ain]() {
+        onAsyncReply(cacheKey, true, ain);
+    });
+}
+
+DeviceBasicStats FritzApi::parseUnitStatsJson(const QByteArray &json) const
+{
+    DeviceBasicStats result;
+
+    QJsonParseError parseError;
+    QJsonDocument doc = QJsonDocument::fromJson(json, &parseError);
+    if (doc.isNull()) {
+        qWarning() << "Failed to parse unit stats JSON:" << parseError.errorString();
+        return result;
+    }
+
+    QJsonObject root = doc.object();
+    QJsonObject statsObj = root.value(QStringLiteral("statistics")).toObject();
+    if (statsObj.isEmpty()) {
+        // Unit has no statistics (e.g. group unit)
+        return result;
+    }
+
+    result.fetchTime = QDateTime::currentDateTime();
+
+    // Helper: parse a statistics array (e.g. statistics.energies[])
+    // Each element has: interval (int), period (string), values (array)
+    // Values are newest-first; NaN sentinel is represented as null in JSON.
+    auto parseStatArray = [](const QJsonArray &arr, int targetInterval,
+                              double scale, const QString &unitStr) -> StatSeries {
+        StatSeries s;
+        for (const QJsonValue &sv : arr) {
+            QJsonObject entry = sv.toObject();
+            int interval = entry.value(QStringLiteral("interval")).toInt(0);
+            if (interval != targetInterval)
+                continue;
+            s.grid = interval;
+            s.unit = unitStr;
+            QJsonArray vals = entry.value(QStringLiteral("values")).toArray();
+            s.values.reserve(vals.size());
+            for (const QJsonValue &vv : vals) {
+                if (vv.isNull() || vv.isUndefined())
+                    s.values.append(std::numeric_limits<double>::quiet_NaN());
+                else
+                    s.values.append(vv.toDouble() * scale);
+            }
+            break;
+        }
+        return s;
+    };
+
+    // energies[]: values in Wh, scale=1.0
+    //   interval=900   → 96 values (15-min, 24 h)  — the "Last 24 hours" series
+    //   interval=21600 → 28 values (6-h, 1 week)   — no direct AHA equivalent, skip
+    //   interval=86400 → 31 values (daily, 1 month)
+    //   interval=2678400 → 24 values (monthly, ~2 years)
+    QJsonArray energiesArr = statsObj.value(QStringLiteral("energies")).toArray();
+    {
+        StatSeries s900  = parseStatArray(energiesArr, 900,     1.0, QStringLiteral("Wh"));
+        StatSeries s86400 = parseStatArray(energiesArr, 86400,  1.0, QStringLiteral("Wh"));
+        StatSeries s2678400 = parseStatArray(energiesArr, 2678400, 1.0, QStringLiteral("Wh"));
+        if (s900.grid > 0 && !s900.values.isEmpty())
+            result.energy.append(s900);
+        if (s86400.grid > 0 && !s86400.values.isEmpty())
+            result.energy.append(s86400);
+        if (s2678400.grid > 0 && !s2678400.values.isEmpty())
+            result.energy.append(s2678400);
+    }
+
+    // When no usable energy series were found, capture the Fritz!Box-reported
+    // statisticsState so the UI can show a meaningful reason.  The state is
+    // per-entry in the JSON (e.g. "valid", "unknown", "notConnected"); we
+    // pick the first non-"valid" state from the energies array.
+    if (result.energy.isEmpty() && !energiesArr.isEmpty()) {
+        for (const QJsonValue &ev : energiesArr) {
+            QString state = ev.toObject()
+                                .value(QStringLiteral("statisticsState"))
+                                .toString();
+            if (!state.isEmpty() && state != QLatin1String("valid")) {
+                result.energyStatsState = state;
+                break;
+            }
+        }
+    }
+
+    // powers[]: values in mW, scale=0.001 to convert to W
+    QJsonArray powersArr = statsObj.value(QStringLiteral("powers")).toArray();
+    {
+        // mW → W: scale = 1/1000 = 0.001
+        StatSeries s10 = parseStatArray(powersArr, 10, 0.001, QStringLiteral("W"));
+        if (s10.grid > 0 && !s10.values.isEmpty())
+            result.power.append(s10);
+    }
+
+    // temperatures[]: values in °C (float), interval=900
+    QJsonArray tempsArr = statsObj.value(QStringLiteral("temperatures")).toArray();
+    {
+        StatSeries s900 = parseStatArray(tempsArr, 900, 1.0, QStringLiteral("°C"));
+        if (s900.grid > 0 && !s900.values.isEmpty())
+            result.temperature.append(s900);
+    }
+
+    // voltages[]: values in mV, interval=10; convert to V (scale=0.001)
+    QJsonArray voltagesArr = statsObj.value(QStringLiteral("voltages")).toArray();
+    {
+        StatSeries s10 = parseStatArray(voltagesArr, 10, 0.001, QStringLiteral("V"));
+        if (s10.grid > 0 && !s10.values.isEmpty())
+            result.voltage.append(s10);
+    }
+
+    result.valid = true;
+    return result;
 }
 
 // ---- REST control helpers ----
@@ -715,7 +975,26 @@ void FritzApi::putUnitInterfaces(const QString &ain, const QJsonObject &interfac
     QNetworkRequest req = buildRestRequest(path);
     auto *reply = put(req, bodyData);
     connect(reply, &QNetworkReply::finished, this, [this, reply, ain, cmdName]() {
-        onCommandReply(reply, ain, cmdName);
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            // HTTP 401 → session expired
+            int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            if (httpStatus == 401) {
+                handleSessionExpiry();
+                return;
+            }
+            if (reply->error() != QNetworkReply::OperationCanceledError)
+                emit commandFailed(ain, reply->errorString());
+            return;
+        }
+
+        emit commandSuccess(ain, cmdName);
+        // Invalidate cache and refresh device list after command
+        clearAllCaches();
+        QTimer::singleShot(500, this, [this]() {
+            if (isLoggedIn())
+                fetchDeviceList();
+        });
     });
 }
 
@@ -903,152 +1182,32 @@ void FritzApi::onPollTimer()
     }
 }
 
-// ---- Device stats (REST: GET /api/v0/smarthome/overview/units/{unitUID}) ----
+// ---- Backward-compatible signal-based API (deprecated) ----
+
+void FritzApi::fetchDeviceList()
+{
+    // Backward-compatible signal-based API: emit signals via callbacks
+    fetchDeviceList(
+        [this](const FritzDeviceList &devices) {
+            emit deviceListUpdated(devices);
+        },
+        [this](const QString &error) {
+            emit networkError(error);
+        });
+}
 
 void FritzApi::fetchDeviceStats(const QString &ain)
 {
-    if (!isLoggedIn() || ain.isEmpty())
-        return;
-
-    QString uid = unitUIDForAin(ain);
-    if (uid.isEmpty()) {
-        qWarning() << "fetchDeviceStats: no unitUID found for AIN" << ain;
-        return;
-    }
-
-    QString path = QStringLiteral("/api/v0/smarthome/overview/units/") + QString(QUrl::toPercentEncoding(uid));
-    QNetworkRequest req = buildRestRequest(path);
-    auto *reply = get(req);
-    connect(reply, &QNetworkReply::finished, this, [this, reply, ain]() {
-        onDeviceStatsReply(reply, ain);
-    });
-}
-
-void FritzApi::onDeviceStatsReply(QNetworkReply *reply, const QString &ain)
-{
-    reply->deleteLater();
-    if (reply->error() != QNetworkReply::NoError) {
-        int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        if (httpStatus == 401) {
-            handleSessionExpiry();
-            return;
-        }
-        if (reply->error() != QNetworkReply::OperationCanceledError) {
-            emit networkError(reply->errorString());
-            emit deviceStatsError(ain, reply->errorString());
-        }
-        return;
-    }
-    QByteArray data = reply->readAll();
-    DeviceBasicStats stats = parseUnitStatsJson(data);
-    if (stats.valid) {
-        for (FritzDevice &dev : m_devices) {
-            if (dev.ain == ain) {
-                dev.basicStats = stats;
-                break;
-            }
-        }
-        emit deviceStatsUpdated(ain, stats);
-    }
-}
-
-DeviceBasicStats FritzApi::parseUnitStatsJson(const QByteArray &json) const
-{
-    DeviceBasicStats result;
-
-    QJsonParseError parseError;
-    QJsonDocument doc = QJsonDocument::fromJson(json, &parseError);
-    if (doc.isNull()) {
-        qWarning() << "Failed to parse unit stats JSON:" << parseError.errorString();
-        return result;
-    }
-
-    QJsonObject root = doc.object();
-    QJsonObject statsObj = root.value(QStringLiteral("statistics")).toObject();
-    if (statsObj.isEmpty()) {
-        // Unit has no statistics (e.g. group unit)
-        return result;
-    }
-
-    result.fetchTime = QDateTime::currentDateTime();
-
-    // Helper: parse a statistics array (e.g. statistics.energies[])
-    // Each element has: interval (int), period (string), values (array)
-    // Values are newest-first; NaN sentinel is represented as null in JSON.
-    auto parseStatArray = [](const QJsonArray &arr, int targetInterval,
-                              double scale, const QString &unitStr) -> StatSeries {
-        StatSeries s;
-        for (const QJsonValue &sv : arr) {
-            QJsonObject entry = sv.toObject();
-            int interval = entry.value(QStringLiteral("interval")).toInt(0);
-            if (interval != targetInterval)
-                continue;
-            s.grid = interval;
-            s.unit = unitStr;
-            QJsonArray vals = entry.value(QStringLiteral("values")).toArray();
-            s.values.reserve(vals.size());
-            for (const QJsonValue &vv : vals) {
-                if (vv.isNull() || vv.isUndefined())
-                    s.values.append(std::numeric_limits<double>::quiet_NaN());
-                else
-                    s.values.append(vv.toDouble() * scale);
-            }
-            break;
-        }
-        return s;
-    };
-
-    // energies[]: values in Wh, scale=1.0
-    //   interval=900   → 96 values (15-min, 24 h)  — the "Last 24 hours" series
-    //   interval=21600 → 28 values (6-h, 1 week)   — no direct AHA equivalent, skip
-    //   interval=86400 → 31 values (daily, 1 month)
-    //   interval=2678400 → 24 values (monthly, ~2 years)
-    QJsonArray energiesArr = statsObj.value(QStringLiteral("energies")).toArray();
-    {
-        StatSeries s900  = parseStatArray(energiesArr, 900,     1.0, QStringLiteral("Wh"));
-        StatSeries s86400 = parseStatArray(energiesArr, 86400,  1.0, QStringLiteral("Wh"));
-        StatSeries s2678400 = parseStatArray(energiesArr, 2678400, 1.0, QStringLiteral("Wh"));
-        if (s900.grid > 0 && !s900.values.isEmpty())
-            result.energy.append(s900);
-        if (s86400.grid > 0 && !s86400.values.isEmpty())
-            result.energy.append(s86400);
-        if (s2678400.grid > 0 && !s2678400.values.isEmpty())
-            result.energy.append(s2678400);
-    }
-
-    // powers[]: values in mW, scale=0.001 to convert to W (matching AHA "0.01W" scale expectation)
-    //   interval=10 → 360 values (10-s, 1 hour)
-    // Note: AHA stored power in raw units with scale 0.01W. We store directly as W
-    // using grid=10, unit="0.01W" so existing chart code (which multiplies by 0.01) still works.
-    // Actually: chartwidget reads StatSeries.values which are already scaled. We set scale=0.001
-    // to get W, and use unit="W" — but chartwidget uses unit string only for labels, not for
-    // re-scaling (values are already physical). Let's use the same unit string as AHA for
-    // compatibility: "0.01W" means chartwidget will NOT re-scale (values already in W).
-    // Simplest: store values already in W (mW / 1000), unit="W".
-    QJsonArray powersArr = statsObj.value(QStringLiteral("powers")).toArray();
-    {
-        // mW → W: scale = 1/1000 = 0.001
-        StatSeries s10 = parseStatArray(powersArr, 10, 0.001, QStringLiteral("W"));
-        if (s10.grid > 0 && !s10.values.isEmpty())
-            result.power.append(s10);
-    }
-
-    // temperatures[]: values in °C (float), interval=900
-    QJsonArray tempsArr = statsObj.value(QStringLiteral("temperatures")).toArray();
-    {
-        StatSeries s900 = parseStatArray(tempsArr, 900, 1.0, QStringLiteral("°C"));
-        if (s900.grid > 0 && !s900.values.isEmpty())
-            result.temperature.append(s900);
-    }
-
-    // voltages[]: values in mV, interval=10; convert to V (scale=0.001)
-    QJsonArray voltagesArr = statsObj.value(QStringLiteral("voltages")).toArray();
-    {
-        StatSeries s10 = parseStatArray(voltagesArr, 10, 0.001, QStringLiteral("V"));
-        if (s10.grid > 0 && !s10.values.isEmpty())
-            result.voltage.append(s10);
-    }
-
-    result.valid = true;
-    return result;
+    // Backward-compatible signal-based API: emit signals via callbacks
+    fetchDeviceStats(ain,
+        [this, ain](const DeviceBasicStats &stats) {
+            if (stats.valid)
+                emit deviceStatsUpdated(ain, stats);
+            else
+                emit deviceStatsError(ain, i18n("Fritz!Box returned no statistics for this device."));
+        },
+        [this, ain](const QString &error) {
+            emit networkError(error);
+            emit deviceStatsError(ain, error);
+        });
 }

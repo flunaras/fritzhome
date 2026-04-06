@@ -54,6 +54,12 @@ struct DeviceBasicStats {
     QList<StatSeries> voltage;     ///< V  (raw unit "0.001V" → divide by 1000)
     QDateTime fetchTime;           ///< when the request was made (used to reconstruct timestamps)
     bool valid = false;
+
+    /// Non-empty when the Fritz!Box returned a statistics object but energy
+    /// data was unavailable.  Contains the Fritz!Box-reported
+    /// ``statisticsState`` value (e.g. ``"unknown"``, ``"notConnected"``)
+    /// so the UI can show a meaningful reason instead of a generic message.
+    QString energyStatsState;
 };
 
 struct ThermostatStats {

@@ -993,6 +993,9 @@ void ChartWidget::updateDevice(const FritzDevice &device,
     m_gaugePowerLabel   = nullptr;
     m_gaugeVoltageLabel = nullptr;
     m_energyHistoryTabIndex = -1;
+    m_activeEnergyGrid      = 0;
+    m_lastAvailableGrids    = 0;
+    m_lastEnergyStats       = DeviceBasicStats();
     m_energyResCombo = nullptr;
     m_energyChartView = nullptr;
     // The lock checkboxes are owned by the tab widgets (reparented in makeChartTab).
@@ -2253,10 +2256,10 @@ void ChartWidget::buildEnergyHistoryPlaceholder(const QStringList &viewLabels,
 
     m_energyResCombo = combo;
     m_energyChartView = nullptr;
-    // m_activeEnergyGrid intentionally left unchanged (stays 0 on first call).
-    // The skip-rebuild guards in updateEnergyStats() / updateGroupEnergyStats()
-    // check "m_activeEnergyGrid > 0" first, so a placeholder state always
-    // triggers a full rebuild when new data arrives.
+    // Reset m_activeEnergyGrid to 0 so the skip-rebuild guards in
+    // updateEnergyStats() / updateGroupEnergyStats() always trigger a full
+    // rebuild when new data arrives while a placeholder is showing.
+    m_activeEnergyGrid = 0;
 
     connect(combo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &ChartWidget::onEnergyResolutionChanged);
@@ -2292,11 +2295,27 @@ void ChartWidget::buildEnergyHistoryChart(const DeviceBasicStats &stats)
     }
 
     if (!hourlySeries && !dailySeries && !monthlySeries) {
-        QLabel *noData = new QLabel(i18n("No energy history available from Fritz!Box."), this);
+        // Show a message explaining *why* energy history is unavailable.
+        // The Fritz!Box REST API sets a "statisticsState" per series entry
+        // (e.g. "unknown", "notConnected") when data is not available.
+        QString reason;
+        if (stats.energyStatsState == QLatin1String("notConnected"))
+            reason = i18n("Device is not connected — statistics are unavailable.");
+        else if (stats.energyStatsState == QLatin1String("unknown"))
+            reason = i18n("Statistics for this device are not yet available.\n"
+                          "The Fritz!Box may still be collecting data.");
+        else if (!stats.energyStatsState.isEmpty())
+            reason = i18n("Fritz!Box reported energy statistics state: %1", stats.energyStatsState);
+        else
+            reason = i18n("No energy history available from Fritz!Box.");
+
+        QLabel *noData = new QLabel(reason, this);
         noData->setAlignment(Qt::AlignCenter);
+        noData->setWordWrap(true);
         m_energyHistoryTabIndex = m_tabs->insertTab(
             m_energyHistoryTabIndex >= 0 ? m_energyHistoryTabIndex : m_tabs->count(),
             noData, i18n("Energy History"));
+        m_activeEnergyGrid = 0;
         return;
     }
 
@@ -2475,6 +2494,16 @@ void ChartWidget::buildEnergyHistoryChart(const DeviceBasicStats &stats)
     for (double v : barValues) rawTotal += v;
     double maxVal = 0.0;
     for (double v : barValues) maxVal = qMax(maxVal, v);
+
+    // All values are zero or NaN → show an informative placeholder instead of
+    // rendering invisible zero-height bars (which looks like an empty/broken chart).
+    if (rawTotal == 0.0) {
+        QStringList labels;
+        for (int i = 0; i < nViews; ++i)
+            labels << i18n(views[i].label);
+        buildEnergyHistoryPlaceholder(labels, selectedIdx);
+        return;
+    }
 
     // For the 15-minute view, individual slot values are small (typically < 100 Wh)
     // so always use Wh to avoid Y-axis labels collapsing to "0.0 kWh".
@@ -2872,11 +2901,39 @@ void ChartWidget::buildEnergyHistoryChartStacked(
     }
 
     if (!has900 && !has86400 && !has2678400) {
-        QLabel *noData = new QLabel(i18n("No energy history available from Fritz!Box."), this);
+        // Collect non-valid statisticsState values from all members to explain
+        // why no energy data is available for the group.
+        QStringList reasons;
+        for (const auto &pair : memberStats) {
+            const QString &state = pair.second.energyStatsState;
+            if (state.isEmpty())
+                continue;
+            QString msg;
+            if (state == QLatin1String("notConnected"))
+                msg = i18n("%1: device not connected", pair.first);
+            else if (state == QLatin1String("unknown"))
+                msg = i18n("%1: statistics not yet available", pair.first);
+            else
+                msg = i18n("%1: %2", pair.first, state);
+            if (!reasons.contains(msg))
+                reasons.append(msg);
+        }
+
+        QString text;
+        if (reasons.isEmpty()) {
+            text = i18n("No energy history available from Fritz!Box.");
+        } else {
+            text = i18n("No energy history available from Fritz!Box:") +
+                   QStringLiteral("\n\n") + reasons.join(QStringLiteral("\n"));
+        }
+
+        QLabel *noData = new QLabel(text, this);
         noData->setAlignment(Qt::AlignCenter);
+        noData->setWordWrap(true);
         m_energyHistoryTabIndex = m_tabs->insertTab(
             m_energyHistoryTabIndex >= 0 ? m_energyHistoryTabIndex : m_tabs->count(),
             noData, i18n("Energy History"));
+        m_activeEnergyGrid = 0;
         return;
     }
 
@@ -3024,6 +3081,17 @@ void ChartWidget::buildEnergyHistoryChartStacked(
             maxStack    = qMax(maxStack, slotSum);
         }
     }
+
+    // All values are zero or NaN → show an informative placeholder instead of
+    // rendering invisible zero-height bars (which looks like an empty/broken chart).
+    if (grandTotal == 0.0) {
+        QStringList labels;
+        for (int i = 0; i < nViews; ++i)
+            labels << i18n(views[i].label);
+        buildEnergyHistoryPlaceholder(labels, selectedIdx);
+        return;
+    }
+
     const bool   useKwh = (view.grid != 900) && (grandTotal >= 1000.0);
     const double scale  = useKwh ? 0.001 : 1.0;
 

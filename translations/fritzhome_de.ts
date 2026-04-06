@@ -731,6 +731,32 @@ und passt sich nicht mehr automatisch an neue Daten oder
         <translation>Keine Energieverlaufsdaten von der Fritz!Box verfügbar.</translation>
     </message>
     <message>
+        <source>No energy history available from Fritz!Box:</source>
+        <translation>Keine Energieverlaufsdaten von der Fritz!Box verfügbar:</translation>
+    </message>
+    <message>
+        <source>Device is not connected — statistics are unavailable.</source>
+        <translation>Gerät ist nicht verbunden – Statistiken sind nicht verfügbar.</translation>
+    </message>
+    <message>
+        <source>Statistics for this device are not yet available.
+The Fritz!Box may still be collecting data.</source>
+        <translation>Statistiken für dieses Gerät sind noch nicht verfügbar.
+Die Fritz!Box sammelt möglicherweise noch Daten.</translation>
+    </message>
+    <message>
+        <source>Fritz!Box reported energy statistics state: %1</source>
+        <translation>Fritz!Box meldet Energiestatistik-Status: %1</translation>
+    </message>
+    <message>
+        <source>%1: device not connected</source>
+        <translation>%1: Gerät nicht verbunden</translation>
+    </message>
+    <message>
+        <source>%1: statistics not yet available</source>
+        <translation>%1: Statistiken noch nicht verfügbar</translation>
+    </message>
+    <message>
         <source>Total Energy Consumed</source>
         <translation>Gesamtenergieverbrauch</translation>
     </message>
@@ -789,6 +815,26 @@ Daten werden angezeigt, sobald sie von der Fritz!Box verfügbar sind.</translati
     <message>
         <source>Session expired and automatic re-login failed %1 time(s). Please check your credentials.</source>
         <translation>Sitzung abgelaufen und automatische Neuanmeldung ist %1-mal fehlgeschlagen. Bitte überprüfen Sie Ihre Zugangsdaten.</translation>
+    </message>
+    <message>
+        <source>Session expired</source>
+        <translation>Sitzung abgelaufen</translation>
+    </message>
+    <message>
+        <source>Not logged in</source>
+        <translation>Nicht angemeldet</translation>
+    </message>
+    <message>
+        <source>Not logged in or empty AIN</source>
+        <translation>Nicht angemeldet oder leere AIN</translation>
+    </message>
+    <message>
+        <source>Unknown device AIN: %1</source>
+        <translation>Unbekannte Geräte-AIN: %1</translation>
+    </message>
+    <message>
+        <source>Fritz!Box returned no statistics for this device.</source>
+        <translation>Die Fritz!Box hat keine Statistikdaten für dieses Gerät zurückgegeben.</translation>
     </message>
 
     <!-- ── Abbreviated month names (energy history chart axis labels) ──── -->

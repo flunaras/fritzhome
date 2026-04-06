@@ -675,9 +675,14 @@ void MainWindow::onDeviceListUpdated(const FritzDeviceList &devices)
                     m_chartWidget->updateRollingCharts(dev, memberDevs);
                     // Refresh energy history stats; throttle interval depends on the
                     // currently displayed view: 60 s for the 15-min/24-h chart
-                    // (so the most-recent bar stays fresh), 5 min otherwise.
+                    // (so the most-recent bar stays fresh), 5 min for daily/monthly,
+                    // 30 s when no chart has been built yet (grid==0, placeholder state)
+                    // so data appears quickly after the first fetch.
                     if (dev.hasEnergyMeter()) {
-                        const int throttleSecs = (m_chartWidget->activeEnergyGrid() == 900) ? 60 : 300;
+                        const int grid = m_chartWidget->activeEnergyGrid();
+                        const int throttleSecs = (grid == 0)   ? 30
+                                               : (grid == 900) ? 60
+                                                                : 300;
                         if (!m_lastStatsFetch.isValid() ||
                             m_lastStatsFetch.secsTo(QDateTime::currentDateTime()) >= throttleSecs) {
                             if (dev.isGroup()) {
@@ -749,7 +754,9 @@ void MainWindow::onCommandSuccess(const QString &ain, const QString &cmd)
         }
     }
     // Trigger an immediate refresh so the UI reflects the change
-    QTimer::singleShot(300, m_api, &FritzApi::fetchDeviceList);
+    QTimer::singleShot(300, this, [this]() {
+        m_api->fetchDeviceList();
+    });
 }
 
 void MainWindow::onCommandFailed(const QString &ain, const QString &error)
