@@ -28,19 +28,7 @@ QString DeviceModel::primaryTypeLabel(const FritzDevice &dev) const
 
 QString DeviceModel::primaryIconName(const FritzDevice &dev) const
 {
-    switch (dev.primaryType()) {
-    case FritzDevice::PrimaryType::Group:           return QStringLiteral(":/icons/device-group.svg");
-    case FritzDevice::PrimaryType::ColorBulb:       return QStringLiteral(":/icons/device-color-bulb.svg");
-    case FritzDevice::PrimaryType::Dimmer:          return QStringLiteral(":/icons/device-dimmer.svg");
-    case FritzDevice::PrimaryType::SmartPlug:       return QStringLiteral(":/icons/device-smart-plug.svg");
-    case FritzDevice::PrimaryType::Switch:          return QStringLiteral(":/icons/device-switch.svg");
-    case FritzDevice::PrimaryType::Thermostat:      return QStringLiteral(":/icons/device-thermostat.svg");
-    case FritzDevice::PrimaryType::Blind:           return QStringLiteral(":/icons/device-blind.svg");
-    case FritzDevice::PrimaryType::Alarm:           return QStringLiteral(":/icons/device-alarm.svg");
-    case FritzDevice::PrimaryType::HumiditySensor:  return QStringLiteral(":/icons/device-humidity.svg");
-    case FritzDevice::PrimaryType::Sensor:          return QStringLiteral(":/icons/device-sensor.svg");
-    }
-    return QStringLiteral(":/icons/device-sensor.svg");
+    return dev.iconPath();
 }
 
 // ---------------------------------------------------------------------------

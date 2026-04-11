@@ -66,23 +66,9 @@ enum PanelIndex {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Returns the appropriate 32x32 icon pixmap for the heading of the details panel.
-// Mirrors the logic in DeviceModel::primaryIconName().
 static QPixmap deviceHeadingPixmap(const FritzDevice &dev)
 {
-    QString path;
-    switch (dev.primaryType()) {
-    case FritzDevice::PrimaryType::Group:           path = QStringLiteral(":/icons/device-group.svg");      break;
-    case FritzDevice::PrimaryType::ColorBulb:       path = QStringLiteral(":/icons/device-color-bulb.svg"); break;
-    case FritzDevice::PrimaryType::Dimmer:          path = QStringLiteral(":/icons/device-dimmer.svg");     break;
-    case FritzDevice::PrimaryType::SmartPlug:       path = QStringLiteral(":/icons/device-smart-plug.svg"); break;
-    case FritzDevice::PrimaryType::Switch:          path = QStringLiteral(":/icons/device-switch.svg");     break;
-    case FritzDevice::PrimaryType::Thermostat:      path = QStringLiteral(":/icons/device-thermostat.svg"); break;
-    case FritzDevice::PrimaryType::Blind:           path = QStringLiteral(":/icons/device-blind.svg");      break;
-    case FritzDevice::PrimaryType::Alarm:           path = QStringLiteral(":/icons/device-alarm.svg");      break;
-    case FritzDevice::PrimaryType::HumiditySensor:  path = QStringLiteral(":/icons/device-humidity.svg");   break;
-    case FritzDevice::PrimaryType::Sensor:          path = QStringLiteral(":/icons/device-sensor.svg");     break;
-    }
-    return QIcon(path).pixmap(32, 32);
+    return QIcon(dev.iconPath()).pixmap(32, 32);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

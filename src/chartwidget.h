@@ -1,5 +1,14 @@
 #pragma once
 
+/// \file chartwidget.h
+/// \brief Top-level chart widget that orchestrates four builder classes
+///        (TemperatureChartBuilder, PowerChartBuilder, EnergyGaugeBuilder,
+///        EnergyHistoryBuilder) to render device statistics.
+///
+/// ChartWidget owns the tab widget, scroll bars, and shared time-window
+/// state.  Each builder manages its own chart tabs, axes, series, and
+/// labels, accessing ChartWidget internals via friend-class grants.
+
 #include <QWidget>
 #include <QLabel>
 #include <QComboBox>
@@ -8,45 +17,21 @@
 #include <QPair>
 #include <QString>
 #include <QPointer>
+#include <functional>
 
-#include <QtCharts/QChartView>
 #include "fritzdevice.h"
+#include "temperaturechartbuilder.h"
+#include "powerchartbuilder.h"
+#include "energygaugebuilder.h"
+#include "energyhistorybuilder.h"
 
-
-// Forward-declare Qt Charts types to avoid pulling in the whole namespace here
+// Forward-declare Qt types used by ChartWidget
 QT_FORWARD_DECLARE_CLASS(QTabWidget)
 QT_FORWARD_DECLARE_CLASS(QScrollBar)
 QT_FORWARD_DECLARE_CLASS(QLabel)
 QT_FORWARD_DECLARE_CLASS(QSettings)
 QT_FORWARD_DECLARE_CLASS(QComboBox)
 QT_FORWARD_DECLARE_CLASS(QCheckBox)
-QT_FORWARD_DECLARE_CLASS(QGraphicsTextItem)
-
-// Qt5: charts live in QtCharts namespace; Qt6: global namespace (no wrapper needed)
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-#  define QTCHARTS_NS
-class QDateTimeAxis;
-class QValueAxis;
-class QChartView;
-class QLineSeries;
-class QPieSeries;
-class QXYSeries;
-#else
-#  define QTCHARTS_NS QtCharts::
-namespace QtCharts {
-class QDateTimeAxis;
-class QValueAxis;
-class QChartView;
-class QLineSeries;
-class QPieSeries;
-class QXYSeries;
-}
-#endif
-
-// Forward-declare the PieTooltipFilter used by the chart implementation so the
-// header can store a typed QPointer without pulling the filter's full
-// definition into the public header.
-class PieTooltipFilter;
 
 /**
  * ChartWidget renders historical time-series charts for:
@@ -102,18 +87,17 @@ public:
     /// Returns the grid interval (in seconds) of the currently displayed energy
     /// history view: 900 (15-min / 24 h), 86400 (daily), 2678400 (monthly), or
     /// 0 if no energy history tab has been built yet.
-    int activeEnergyGrid() const { return m_activeEnergyGrid; }
+    int activeEnergyGrid() const { return m_historyBuilder.activeEnergyGrid(); }
 
 private slots:
     void onWindowComboChanged(int index);
     void onScrollBarChanged(int value);
-    void onEnergyResolutionChanged(int index);
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
-    // -- builders (called once per updateDevice) ------------------------------
+    // -- orchestration (called once per updateDevice) -------------------------
     /// Reset axis/series/label pointers and unlock scales on device switch.
     void resetChartState(bool deviceChanged);
     /// Reparent persistent controls and delete all tab widgets safely.
@@ -125,25 +109,18 @@ private:
     /// Restore previously active tab, apply scroll/time-window, persist state.
     void restoreTabAndApplyWindow(const QString &activeTabText);
 
-    void buildTemperatureChart(const FritzDevice &dev);
-    void buildGroupTemperatureChart(const FritzDeviceList &memberDevices);
-    void buildPowerChart(const FritzDevice &dev,
-                         const FritzDeviceList &memberDevices);
-    void buildHumidityChart(const FritzDevice &dev);
-    void buildEnergyGauge(const FritzDevice &dev,
-                          const FritzDeviceList &memberDevices = FritzDeviceList());
-    void buildEnergyHistoryChart(const DeviceBasicStats &stats);
-    void buildEnergyHistoryChartStacked(const QList<QPair<QString, DeviceBasicStats>> &memberStats);
-    void buildEnergyHistoryPlaceholder(const QStringList &viewLabels, int selectedIdx);
+    // -- lock checkbox helper --------------------------------------------------
+    /// Create and wire a "Lock Y scale" checkbox, assigning it to \a checkBoxOut.
+    void createLockCheckBox(QPointer<QCheckBox> &checkBoxOut,
+                            bool &scaleLocked,
+                            double &lockedMin,
+                            double &lockedMax,
+                            const std::function<QValueAxis *()> &activeAxis);
 
-    // -- energy history shared helpers ----------------------------------------
-    /// Build the stacked-layout container (chart + combo overlay + total overlay),
-    /// install event filters, set member state, and insert the Energy History tab.
-    void finalizeEnergyHistoryTab(QTCHARTS_NS QChartView *chartView,
-                                  const QStringList &viewLabels,
-                                  int selectedIdx,
-                                  const QString &totalText,
-                                  int grid);
+    // -- energy history tab replacement ----------------------------------------
+    /// Replace the Energy History tab in-place: tear down the old tab, invoke
+    /// \a buildFn to insert the new one, and restore the previously active tab.
+    void replaceEnergyHistoryTab(const std::function<void()> &buildFn);
 
     // -- time-window helpers (for rolling-poll charts) -----------------------
     /// Returns the selected window duration in milliseconds.
@@ -152,14 +129,8 @@ private:
     void applyTimeWindow();
     /// Update the horizontal scroll bar range/page to match the full data span.
     void updateScrollBar();
-    /// Auto-scale the Y axis to the data visible in [minMs, maxMs].
-    void rescaleYTemp(qint64 minMs, qint64 maxMs);
-    void rescaleYGroupTemp(qint64 minMs, qint64 maxMs);
-    void rescaleYPower(qint64 minMs, qint64 maxMs);
 
     // -- slider visibility ----------------------------------------------------
-    /// Show/hide the time-window combo based on the currently active tab.
-    /// (No-op: combo is now embedded as an overlay; kept for compatibility.)
     void updateSliderVisibility();
 
     // -- settings persistence -------------------------------------------------
@@ -168,96 +139,26 @@ private:
 
     // -- widgets --------------------------------------------------------------
     QTabWidget  *m_tabs            = nullptr;
-    int m_windowComboIndex = 2;             ///< selected time-window index (persisted); per-tab combos are created on build
-    QScrollBar  *m_scrollBar       = nullptr;  ///< horizontal scroll through history (Temperature tab)
-    QScrollBar  *m_powerScrollBar  = nullptr;  ///< horizontal scroll through history (Power tab)
-    QPointer<QCheckBox>   m_powerLockCheckBox = nullptr; ///< "Lock Y scale" checkbox overlaid inside the Power chart area (bottom-left)
-    QPointer<QCheckBox>   m_tempLockCheckBox  = nullptr; ///< "Lock Y scale" checkbox overlaid inside the Temperature chart area (bottom-left)
+    int m_windowComboIndex = 2;             ///< selected time-window index (persisted)
+    QScrollBar  *m_scrollBar       = nullptr;  ///< horizontal scroll (Temperature tab)
+    QScrollBar  *m_powerScrollBar  = nullptr;  ///< horizontal scroll (Power tab)
 
     // -- scroll state ---------------------------------------------------------
-    /// When true the view follows the live end of the data (scroll bar pinned to max).
     bool m_scrollAtEnd = true;
 
-    // -- temperature Y-axis lock ----------------------------------------------
-    /// When true, rescaleYTemp() and rescaleYGroupTemp() are no-ops.
-    bool   m_tempScaleLocked = false;
-    double m_lockedTempMin   = 0.0;   ///< axis minimum captured at lock time
-    double m_lockedTempMax   = 30.0;  ///< axis maximum captured at lock time
-
-    // -- power Y-axis lock ----------------------------------------------------
-    /// When true, rescaleYPower() is a no-op; the axis stays at the range that
-    /// was current when the checkbox was checked.
-    bool   m_powerScaleLocked = false;
-    double m_lockedPowerMin   = 0.0;  ///< axis minimum captured at lock time
-    double m_lockedPowerMax   = 10.0; ///< axis maximum captured at lock time
-
-    // -- cached chart state (rebuilt each updateDevice call) ------------------
+    // -- cached device state --------------------------------------------------
     FritzDevice     m_device;          ///< last device passed to updateDevice()
-    FritzDeviceList m_memberDevices;   ///< for groups: member devices (empty for non-groups)
+    FritzDeviceList m_memberDevices;   ///< for groups: member devices
 
-    // Temperature chart
-    QTCHARTS_NS QDateTimeAxis *m_tempAxisX  = nullptr;
-    QTCHARTS_NS QValueAxis    *m_tempAxisY  = nullptr;
-    QTCHARTS_NS QXYSeries     *m_tempSeries = nullptr;  ///< main temperature line
-    QPointer<QLabel>           m_tempValueLabel = nullptr;
+    // -- builder objects (manage chart-specific state) -------------------------
+    TemperatureChartBuilder m_tempBuilder;
+    PowerChartBuilder       m_powerBuilder;
+    EnergyGaugeBuilder      m_gaugeBuilder;
+    EnergyHistoryBuilder    m_historyBuilder;
 
-    // Group temperature chart — one line series per temperature-capable member.
-    // Axes are shared; series are owned by the QChart.
-    QTCHARTS_NS QDateTimeAxis          *m_groupTempAxisX = nullptr;
-    QTCHARTS_NS QValueAxis             *m_groupTempAxisY = nullptr;
-    QList<QTCHARTS_NS QXYSeries *>      m_groupTempSeries;   ///< one per temp-capable member
-
-    // Power chart
-    QTCHARTS_NS QDateTimeAxis *m_powerAxisX      = nullptr;
-    QTCHARTS_NS QValueAxis    *m_powerAxisY      = nullptr;
-    QTCHARTS_NS QXYSeries     *m_powerSeries     = nullptr; ///< upper (spline) series of the area (single-device mode)
-    QTCHARTS_NS QXYSeries     *m_powerLowerSeries = nullptr; ///< lower (zero baseline) series of the area (single-device mode)
-    QPointer<QLabel>           m_powerValueLabel = nullptr;
-
-    // Stacked power chart (group mode) — parallel upper/lower series per member device.
-    // m_powerStackedUpper[i] is the upper boundary of layer i (= cumulative sum up to member i).
-    // m_powerStackedLower[i] is the lower boundary of layer i (= upper boundary of layer i-1, or zero for i==0).
-    // These are stored as raw pointers; ownership is with the QChart.
-    QList<QTCHARTS_NS QXYSeries *> m_powerStackedUpper;  ///< one per member device
-    QList<QTCHARTS_NS QXYSeries *> m_powerStackedLower;  ///< one per member device (shared with upper[i-1] conceptually)
-
-    // Humidity chart
-    QTCHARTS_NS QXYSeries     *m_humiditySeries = nullptr;
-
-    // Energy gauge tab
-    QPointer<QLabel> m_gaugeKwhLabel    = nullptr;  ///< "X.XXX kWh" value label
-    QPointer<QLabel> m_gaugePowerLabel  = nullptr;  ///< "X.X W" value label
-    QPointer<QLabel> m_gaugeVoltageLabel = nullptr; ///< "X.X V" value label (may be nullptr)
-
-    // Energy history chart (getbasicdevicestats)
-    // The tab index is remembered so we can rebuild it without touching others.
-    int         m_energyHistoryTabIndex  = -1;
-    int         m_energyResSelectedIdx   = 0;  ///< persists user resolution choice across rebuilds
-    int         m_activeEnergyGrid       = 0;  ///< grid of currently displayed energy history view (0 = none)
-    QComboBox *m_energyResCombo = nullptr;  ///< resolution selector inside the tab
-    QTCHARTS_NS QChartView *m_energyChartView = nullptr;  ///< chart view for mouse-event forwarding (tooltip fix)
-    DeviceBasicStats m_lastEnergyStats;            ///< latest stats for rebuild (single-device mode)
-    int         m_lastAvailableGrids     = 0;  ///< bitmask of available grids in last build (0=900, 1=86400, 2=2678400)
-
-    // Group energy history mode
-    bool        m_groupHistoryMode       = false;  ///< true when Energy History shows a stacked group chart
-    QList<QPair<QString, DeviceBasicStats>> m_lastGroupMemberStats;  ///< cached member stats for rebuild
-    QStringList m_groupEnergyErrors;              ///< accumulated error messages for group members
-
-    // Energy history error tracking
-    QString     m_energyError;                    ///< current error message for single-device energy stats
-
-    // Optional pie chart showing group member energy distribution
-    QTCHARTS_NS QPieSeries *m_groupEnergyPie = nullptr;
-    QTCHARTS_NS QChartView *m_groupEnergyPieView = nullptr;
-    PieTooltipFilter *m_groupPieTooltipFilter = nullptr; ///< event filter for pie hover tooltips
-
-    void updateGroupPieLabels();
-
-    // Hover interaction: on mouse hover explode the slice for emphasis.
-    // No persistent graphics items are kept for labels in this approach.
-
-    // Tooltip text for the energy history bar chart — set/cleared by QBarSet::hovered,
-    // shown via eventFilter on the chart view viewport (QHelpEvent mechanism).
-    QString     m_energyBarTooltip;
+    // Grant builders access to shared state (m_tabs, m_device, etc.)
+    friend class TemperatureChartBuilder;
+    friend class PowerChartBuilder;
+    friend class EnergyGaugeBuilder;
+    friend class EnergyHistoryBuilder;
 };

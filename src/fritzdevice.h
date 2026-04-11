@@ -200,6 +200,23 @@ struct FritzDevice {
         if (hasHumidity())                           return PrimaryType::HumiditySensor;
         return PrimaryType::Sensor;
     }
+
+    /// Icon resource path for this device's primary type.
+    QString iconPath() const {
+        switch (primaryType()) {
+        case PrimaryType::Group:           return QStringLiteral(":/icons/device-group.svg");
+        case PrimaryType::ColorBulb:       return QStringLiteral(":/icons/device-color-bulb.svg");
+        case PrimaryType::Dimmer:          return QStringLiteral(":/icons/device-dimmer.svg");
+        case PrimaryType::SmartPlug:       return QStringLiteral(":/icons/device-smart-plug.svg");
+        case PrimaryType::Switch:          return QStringLiteral(":/icons/device-switch.svg");
+        case PrimaryType::Thermostat:      return QStringLiteral(":/icons/device-thermostat.svg");
+        case PrimaryType::Blind:           return QStringLiteral(":/icons/device-blind.svg");
+        case PrimaryType::Alarm:           return QStringLiteral(":/icons/device-alarm.svg");
+        case PrimaryType::HumiditySensor:  return QStringLiteral(":/icons/device-humidity.svg");
+        case PrimaryType::Sensor:          return QStringLiteral(":/icons/device-sensor.svg");
+        }
+        return QStringLiteral(":/icons/device-sensor.svg");
+    }
 };
 
 using FritzDeviceList = QList<FritzDevice>;

@@ -143,6 +143,11 @@ set(fritzhome_SRCS
     src/humiditysensorwidget.cpp
     src/alarmwidget.cpp
     src/chartwidget.cpp
+    src/chartutils.cpp
+    src/temperaturechartbuilder.cpp
+    src/powerchartbuilder.cpp
+    src/energygaugebuilder.cpp
+    src/energyhistorybuilder.cpp
     src/secretstore.cpp
     src/resources.qrc
 )
@@ -162,6 +167,11 @@ set(fritzhome_HDRS
     src/humiditysensorwidget.h
     src/alarmwidget.h
     src/chartwidget.h
+    src/chartutils.h
+    src/temperaturechartbuilder.h
+    src/powerchartbuilder.h
+    src/energygaugebuilder.h
+    src/energyhistorybuilder.h
     src/fritzdevice.h
     src/secretstore.h
 )
@@ -177,7 +187,7 @@ add_executable(fritzhome
 # template machinery.  The flag is per-file so it does not hide real issues
 # elsewhere.  Clang does not emit this warning, so the guard is GCC-only.
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    set_source_files_properties(src/chartwidget.cpp PROPERTIES
+    set_source_files_properties(src/chartwidget.cpp src/energyhistorybuilder.cpp PROPERTIES
         COMPILE_OPTIONS "-Wno-stringop-overflow"
     )
 endif()
