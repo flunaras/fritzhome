@@ -19,6 +19,7 @@
 #include <limits>
 #include <cmath>
 #include <algorithm>
+#include <memory>
 
 #include <QtCharts/QChart>
 #include <QtCharts/QChartView>
@@ -49,7 +50,10 @@ static void buildAxisOverlay(QChart *chart,
     chart->setMargins(m);
 
     // --- Row 1 labels (one per bar) ---
-    auto *monthLbls = new QVector<QGraphicsTextItem *>();
+    // Use shared_ptr so the lambda captures shared ownership and the
+    // container is freed when the chart (and its signal connections) are
+    // destroyed — avoids a heap leak on every chart rebuild.
+    auto monthLbls = std::make_shared<QVector<QGraphicsTextItem *>>();
     for (int i = 0; i < nBars; ++i) {
         auto *lbl = new QGraphicsTextItem(monthBarLabels.at(i), chart);
         lbl->setZValue(11);
@@ -62,7 +66,7 @@ static void buildAxisOverlay(QChart *chart,
 
     // --- Row 2 labels (one per contiguous span of identical values) ---
     struct YearSpan { QString year; int first; int last; };
-    auto *yearSpans = new QVector<YearSpan>();
+    auto yearSpans = std::make_shared<QVector<YearSpan>>();
     for (int i = 0; i < nBars; ++i) {
         const QString &y = yearBarLabels.at(i);
         if (!yearSpans->isEmpty() && yearSpans->last().year == y)
@@ -70,7 +74,7 @@ static void buildAxisOverlay(QChart *chart,
         else
             yearSpans->append({y, i, i});
     }
-    auto *yearLbls = new QVector<QGraphicsTextItem *>();
+    auto yearLbls = std::make_shared<QVector<QGraphicsTextItem *>>();
     for (const YearSpan &ys : *yearSpans) {
         auto *lbl = new QGraphicsTextItem(ys.year, chart);
         lbl->setZValue(11);
@@ -130,8 +134,11 @@ static void buildHourSeparators(QChart *chart,
     if (sepCatIndices.isEmpty())
         return;
 
-    auto *sepLines  = new QVector<QGraphicsLineItem *>();
-    auto *sepLabels = new QVector<QGraphicsTextItem *>();
+    // Use shared_ptr so the lambda captures shared ownership and the
+    // containers are freed when the chart (and its signal connections) are
+    // destroyed — avoids a heap leak on every chart rebuild.
+    auto sepLines  = std::make_shared<QVector<QGraphicsLineItem *>>();
+    auto sepLabels = std::make_shared<QVector<QGraphicsTextItem *>>();
     for (int i = 0; i < sepCatIndices.size(); ++i) {
         auto *line = new QGraphicsLineItem(chart);
         QPen pen(QColor(160, 160, 160, 180));

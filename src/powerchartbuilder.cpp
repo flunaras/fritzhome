@@ -248,7 +248,10 @@ void PowerChartBuilder::buildHumidityChart(const FritzDevice &dev)
 void PowerChartBuilder::updateRolling(const FritzDevice &device,
                                       const FritzDeviceList &memberDevices)
 {
-    // Helper: rebuild a QXYSeries from a history list using clear+append.
+    // Helper: rebuild a QXYSeries from a history list using bulk replace().
+    // replace(QList<QPointF>) emits a single pointsReplaced signal instead of
+    // N individual pointAdded signals, which is dramatically faster when the
+    // history list grows large (up to ~17,000 points over 24 hours).
     auto reloadSeries = [](QXYSeries *series,
                            const QList<QPair<QDateTime, double>> &history,
                            double fallbackValue,
@@ -257,11 +260,13 @@ void PowerChartBuilder::updateRolling(const FritzDevice &device,
     {
         if (!series)
             return;
-        series->clear();
+        QList<QPointF> points;
+        points.reserve(history.size() + 1);
         for (const auto &p : history)
-            series->append(p.first.toMSecsSinceEpoch(), p.second);
+            points.append(QPointF(p.first.toMSecsSinceEpoch(), p.second));
         if (history.isEmpty() && hasFallback)
-            series->append(fallbackTs, fallbackValue);
+            points.append(QPointF(fallbackTs, fallbackValue));
+        series->replace(points);
     };
 
     // --- Power (single-device or group fallback) ---
@@ -273,16 +278,17 @@ void PowerChartBuilder::updateRolling(const FritzDevice &device,
         // Keep the lower (zero baseline) series in sync with the upper series
         // time range so QAreaSeries renders the fill correctly for all points.
         if (m_powerLowerSeries) {
-            m_powerLowerSeries->clear();
+            QList<QPointF> lowerPts;
             if (!device.powerHistory.isEmpty()) {
-                m_powerLowerSeries->append(
-                    device.powerHistory.first().first.toMSecsSinceEpoch(), 0);
-                m_powerLowerSeries->append(
-                    device.powerHistory.last().first.toMSecsSinceEpoch(), 0);
+                lowerPts.append(QPointF(
+                    device.powerHistory.first().first.toMSecsSinceEpoch(), 0));
+                lowerPts.append(QPointF(
+                    device.powerHistory.last().first.toMSecsSinceEpoch(), 0));
             } else if (hasFallback) {
-                m_powerLowerSeries->append(fallbackTs - 3600000LL, 0);
-                m_powerLowerSeries->append(fallbackTs, 0);
+                lowerPts.append(QPointF(fallbackTs - 3600000LL, 0));
+                lowerPts.append(QPointF(fallbackTs, 0));
             }
+            m_powerLowerSeries->replace(lowerPts);
         }
         if (m_powerSeries && m_powerValueLabel && device.energyStats.valid)
             m_powerValueLabel->setText(
@@ -325,23 +331,26 @@ void PowerChartBuilder::updateRolling(const FritzDevice &device,
                 }
             }
 
-            // Rebuild each stacked layer in-place
+            // Rebuild each stacked layer in-place using bulk replace()
             const QList<qint64> timestamps = tsMap.keys();
             for (int i = 0; i < n; ++i) {
                 QXYSeries *upper = m_powerStackedUpper.at(i);
                 QXYSeries *lower = m_powerStackedLower.at(i);
                 if (!upper || !lower)
                     continue;
-                upper->clear();
-                lower->clear();
+                QList<QPointF> upperPts, lowerPts;
+                upperPts.reserve(timestamps.size());
+                lowerPts.reserve(timestamps.size());
                 for (qint64 ts : timestamps) {
                     const QVector<double> &vals = tsMap[ts];
                     double lowerVal = 0.0;
                     for (int j = 0; j < i; ++j) lowerVal += vals[j];
                     double upperVal = lowerVal + vals[i];
-                    upper->append(ts, upperVal);
-                    lower->append(ts, lowerVal);
+                    upperPts.append(QPointF(ts, upperVal));
+                    lowerPts.append(QPointF(ts, lowerVal));
                 }
+                upper->replace(upperPts);
+                lower->replace(lowerPts);
             }
 
             // Update power label to show group total

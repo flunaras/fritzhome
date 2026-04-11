@@ -217,9 +217,10 @@ void TemperatureChartBuilder::buildGroupTemperatureChart(const FritzDeviceList &
 void TemperatureChartBuilder::updateRolling(const FritzDevice &device,
                                             const FritzDeviceList &memberDevices)
 {
-    // Helper: rebuild a QXYSeries from a history list using clear+append.
-    // replace() on a series owned by QAreaSeries is unreliable in Qt5;
-    // clear()+append() fires the correct signals that QAreaSeries listens to.
+    // Helper: rebuild a QXYSeries from a history list using bulk replace().
+    // replace(QList<QPointF>) emits a single pointsReplaced signal instead of
+    // N individual pointAdded signals, which is dramatically faster when the
+    // history list grows large (up to ~17,000 points over 24 hours).
     auto reloadSeries = [](QXYSeries *series,
                            const QList<QPair<QDateTime, double>> &history,
                            double fallbackValue,
@@ -228,11 +229,13 @@ void TemperatureChartBuilder::updateRolling(const FritzDevice &device,
     {
         if (!series)
             return;
-        series->clear();
+        QList<QPointF> points;
+        points.reserve(history.size() + 1);
         for (const auto &p : history)
-            series->append(p.first.toMSecsSinceEpoch(), p.second);
+            points.append(QPointF(p.first.toMSecsSinceEpoch(), p.second));
         if (history.isEmpty() && hasFallback)
-            series->append(fallbackTs, fallbackValue);
+            points.append(QPointF(fallbackTs, fallbackValue));
+        series->replace(points);
     };
 
     // --- Temperature (single-device) ---

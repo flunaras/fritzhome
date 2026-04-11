@@ -462,14 +462,17 @@ void FritzApi::onAsyncReply(const QString &cacheKey, bool isDeviceStats, const Q
         // Carry history forward from the previous poll into the freshly parsed devices
         QDateTime now = QDateTime::currentDateTime();
         for (FritzDevice &dev : fresh) {
-            for (const FritzDevice &old : m_devices) {
+            for (FritzDevice &old : m_devices) {
                 if (old.ain != dev.ain)
                     continue;
 
-                dev.temperatureHistory  = old.temperatureHistory;
-                dev.powerHistory        = old.powerHistory;
-                dev.humidityHistory     = old.humidityHistory;
-                dev.basicStats          = old.basicStats;
+                // Move history lists from the previous poll — avoids deep
+                // copy-on-write when we append() below.  The old device
+                // is not used after this point.
+                dev.temperatureHistory  = std::move(old.temperatureHistory);
+                dev.powerHistory        = std::move(old.powerHistory);
+                dev.humidityHistory     = std::move(old.humidityHistory);
+                dev.basicStats          = std::move(old.basicStats);
 
                 if (dev.hasTemperature() && dev.temperature > -273.0)
                     dev.temperatureHistory.append({now, dev.temperature});
