@@ -500,7 +500,154 @@ void FritzApi::onAsyncReply(const QString &cacheKey, bool isDeviceStats, const Q
     }
 }
 
-// ---- REST JSON device list parser ----
+// ── Interface parsing helpers ──────────────────────────────────────────────
+
+/**
+ * Synthesize FritzDevice::functionBitmask from a unit's interfaces object.
+ *
+ * Each interface key maps to a specific function bit in the legacy AHA
+ * bitmask so that existing has*() queries (hasSwitch(), hasThermostat(), …)
+ * work unchanged against REST-sourced data.
+ */
+static void synthesizeFunctionBitmask(const QJsonObject &ifaces, FritzDevice &dev)
+{
+    static const struct { const char *key; int bit; } kMap[] = {
+        { "onOffInterface",         9  },   // SWITCH
+        { "multimeterInterface",    7  },   // ENERGY_METER
+        { "temperatureInterface",   8  },   // TEMPERATURE
+        { "thermostatInterface",    6  },   // THERMOSTAT/HKR
+        { "levelControlInterface",  13 },   // DIMMER
+        { "colorControlInterface",  14 },   // COLOR_BULB
+        { "blindInterface",         18 },   // BLIND2
+        { "humidityInterface",      20 },   // HUMIDITY
+        { "alertInterface",         4  },   // ALARM
+    };
+    for (const auto &entry : kMap) {
+        if (ifaces.contains(QLatin1String(entry.key)))
+            dev.functionBitmask |= (1 << entry.bit);
+    }
+}
+
+/**
+ * Parse current device state from a unit's interfaces JSON.
+ *
+ * Populates the relevant *Stats substruct for every interface the device
+ * advertises.  Called for both physical devices and groups — groups simply
+ * won't have dimmer/color/blind/humidity/alarm interfaces, so those branches
+ * are naturally skipped.
+ */
+static void parseInterfaceState(const QJsonObject &ifaces, FritzDevice &dev)
+{
+    if (dev.hasTemperature()) {
+        QJsonObject ti = ifaces.value(QStringLiteral("temperatureInterface")).toObject();
+        dev.temperature = ti.value(QStringLiteral("celsius")).toDouble(-273.0);
+    }
+
+    if (dev.hasSwitch()) {
+        QJsonObject oi = ifaces.value(QStringLiteral("onOffInterface")).toObject();
+        dev.switchStats.on           = oi.value(QStringLiteral("active")).toBool();
+        dev.switchStats.locked       = oi.value(QStringLiteral("isLockedDeviceApi")).toBool();
+        dev.switchStats.deviceLocked = oi.value(QStringLiteral("isLockedDeviceLocal")).toBool();
+        dev.switchStats.valid = true;
+    }
+
+    if (dev.hasEnergyMeter()) {
+        QJsonObject mi = ifaces.value(QStringLiteral("multimeterInterface")).toObject();
+        // power in mW → divide by 1000 for W
+        dev.energyStats.power   = mi.value(QStringLiteral("power")).toDouble(0.0) / 1000.0;
+        // energy in Wh — already correct
+        dev.energyStats.energy  = mi.value(QStringLiteral("energy")).toDouble(0.0);
+        // voltage in mV → divide by 1000 for V
+        dev.energyStats.voltage = mi.value(QStringLiteral("voltage")).toDouble(0.0) / 1000.0;
+        dev.energyStats.valid   = true;
+    }
+
+    if (dev.hasThermostat()) {
+        QJsonObject hi = ifaces.value(QStringLiteral("thermostatInterface")).toObject();
+        // REST uses float celsius; convert to AHA integer steps (16=8°C .. 56=28°C)
+        // so existing ThermostatWidget display code works unchanged.
+        QString mode = hi.value(QStringLiteral("mode")).toString();
+        if (mode == QStringLiteral("off")) {
+            dev.thermostatStats.targetTemp = 253;
+        } else if (mode == QStringLiteral("on")) {
+            dev.thermostatStats.targetTemp = 254;
+        } else {
+            // "temperature" mode: celsius → AHA steps: steps = (celsius - 8.0) * 2 + 16
+            QJsonObject setPoint = hi.value(QStringLiteral("setPointTemperature")).toObject();
+            double celsius = setPoint.value(QStringLiteral("celsius")).toDouble(8.0);
+            dev.thermostatStats.targetTemp = qRound((celsius - 8.0) * 2.0) + 16;
+        }
+        // currentTemp in 0.1°C steps: REST gives °C float → multiply by 10
+        QJsonObject measured = hi.value(QStringLiteral("measuredTemperature")).toObject();
+        double measCelsius = measured.value(QStringLiteral("celsius")).toDouble(0.0);
+        dev.thermostatStats.currentTemp = qRound(measCelsius * 10.0);
+    }
+
+    if (dev.hasDimmer()) {
+        QJsonObject li = ifaces.value(QStringLiteral("levelControlInterface")).toObject();
+        // REST level is 0–100 (percentage); AHA was 0–255 for level, 0–100 for percent
+        int levelPct = li.value(QStringLiteral("level")).toInt(0);
+        dev.dimmerStats.levelPercent = levelPct;
+        // Synthesize AHA-style 0–255 level from percentage
+        dev.dimmerStats.level = qRound(levelPct * 255.0 / 100.0);
+        // on/off from onOffInterface if present, else treat level>0 as on
+        if (dev.hasSwitch())
+            dev.dimmerStats.on = dev.switchStats.on;
+        else
+            dev.dimmerStats.on = levelPct > 0;
+        dev.dimmerStats.valid = true;
+    }
+
+    if (dev.hasColorBulb()) {
+        QJsonObject ci = ifaces.value(QStringLiteral("colorControlInterface")).toObject();
+        // REST: hsColor.hue 0–360, hsColor.saturation 0–100; AHA: hue 0–359, sat 0–255
+        QJsonObject hsColor = ci.value(QStringLiteral("hsColor")).toObject();
+        dev.colorStats.hue = hsColor.value(QStringLiteral("hue")).toInt(0);
+        // Convert REST saturation 0–100 → AHA saturation 0–255
+        int satPct = hsColor.value(QStringLiteral("saturation")).toInt(0);
+        dev.colorStats.saturation = qRound(satPct * 255.0 / 100.0);
+        dev.colorStats.unmappedHue = dev.colorStats.hue;
+        dev.colorStats.unmappedSaturation = dev.colorStats.saturation;
+        dev.colorStats.colorTemperature = ci.value(QStringLiteral("colorTemperature")).toInt(0);
+        // Determine colorMode: "1" = hue/sat, "4" = color temperature
+        if (ci.contains(QStringLiteral("colorTemperature")) &&
+            ci.value(QStringLiteral("colorTemperature")).toInt(0) > 0)
+            dev.colorStats.colorMode = QStringLiteral("4");
+        else
+            dev.colorStats.colorMode = QStringLiteral("1");
+        dev.colorStats.valid = true;
+    }
+
+    if (dev.hasBlind()) {
+        QJsonObject bi = ifaces.value(QStringLiteral("blindInterface")).toObject();
+        // REST blindAction: "moveUp"/"moveDown"/"stop"
+        // Map to AHA-style "open"/"close"/"stop" for BlindWidget
+        QString action = bi.value(QStringLiteral("blindAction")).toString();
+        if (action == QStringLiteral("moveUp"))
+            dev.blindStats.mode = QStringLiteral("open");
+        else if (action == QStringLiteral("moveDown"))
+            dev.blindStats.mode = QStringLiteral("close");
+        else
+            dev.blindStats.mode = QStringLiteral("stop");
+        dev.blindStats.endPosition = bi.value(QStringLiteral("position")).toInt(0);
+        dev.blindStats.valid = true;
+    }
+
+    if (dev.hasHumidity()) {
+        QJsonObject humi = ifaces.value(QStringLiteral("humidityInterface")).toObject();
+        dev.humidityStats.humidity = qRound(humi.value(QStringLiteral("humidity")).toDouble(0.0));
+        dev.humidityStats.valid = true;
+    }
+
+    if (dev.hasAlarm()) {
+        QJsonObject ai = ifaces.value(QStringLiteral("alertInterface")).toObject();
+        dev.alarmStats.triggered = ai.value(QStringLiteral("state")).toString()
+            == QStringLiteral("triggered");
+        dev.alarmStats.valid = true;
+    }
+}
+
+// ── REST JSON device list parser ──────────────────────────────────────────
 
 FritzDeviceList FritzApi::parseDeviceListJson(const QByteArray &json) const
 {
@@ -570,136 +717,10 @@ FritzDeviceList FritzApi::parseDeviceListJson(const QByteArray &json) const
             QJsonObject u = unitMap.value(dev.unitUID);
             QJsonObject ifaces = u.value(QStringLiteral("interfaces")).toObject();
 
-            if (ifaces.contains(QStringLiteral("onOffInterface")))
-                dev.functionBitmask |= (1 << 9);   // SWITCH
-            if (ifaces.contains(QStringLiteral("multimeterInterface")))
-                dev.functionBitmask |= (1 << 7);   // ENERGY_METER
-            if (ifaces.contains(QStringLiteral("temperatureInterface")))
-                dev.functionBitmask |= (1 << 8);   // TEMPERATURE
-            if (ifaces.contains(QStringLiteral("thermostatInterface")))
-                dev.functionBitmask |= (1 << 6);   // THERMOSTAT/HKR
-            if (ifaces.contains(QStringLiteral("levelControlInterface")))
-                dev.functionBitmask |= (1 << 13);  // DIMMER
-            if (ifaces.contains(QStringLiteral("colorControlInterface")))
-                dev.functionBitmask |= (1 << 14);  // COLOR_BULB
-            if (ifaces.contains(QStringLiteral("blindInterface")))
-                dev.functionBitmask |= (1 << 18);  // BLIND2
-            if (ifaces.contains(QStringLiteral("humidityInterface")))
-                dev.functionBitmask |= (1 << 20);  // HUMIDITY
-            if (ifaces.contains(QStringLiteral("alertInterface")))
-                dev.functionBitmask |= (1 << 4);   // ALARM
+            synthesizeFunctionBitmask(ifaces, dev);
+            parseInterfaceState(ifaces, dev);
 
-            // Parse current state from interfaces
-            if (dev.hasTemperature()) {
-                QJsonObject ti = ifaces.value(QStringLiteral("temperatureInterface")).toObject();
-                double celsius = ti.value(QStringLiteral("celsius")).toDouble(-273.0);
-                dev.temperature = celsius;
-            }
-
-            if (dev.hasSwitch()) {
-                QJsonObject oi = ifaces.value(QStringLiteral("onOffInterface")).toObject();
-                dev.switchStats.on           = oi.value(QStringLiteral("active")).toBool();
-                dev.switchStats.locked       = oi.value(QStringLiteral("isLockedDeviceApi")).toBool();
-                dev.switchStats.deviceLocked = oi.value(QStringLiteral("isLockedDeviceLocal")).toBool();
-                dev.switchStats.valid = true;
-            }
-
-            if (dev.hasEnergyMeter()) {
-                QJsonObject mi = ifaces.value(QStringLiteral("multimeterInterface")).toObject();
-                // power in mW → divide by 1000 for W
-                dev.energyStats.power   = mi.value(QStringLiteral("power")).toDouble(0.0) / 1000.0;
-                // energy in Wh — already correct
-                dev.energyStats.energy  = mi.value(QStringLiteral("energy")).toDouble(0.0);
-                // voltage in mV → divide by 1000 for V
-                dev.energyStats.voltage = mi.value(QStringLiteral("voltage")).toDouble(0.0) / 1000.0;
-                dev.energyStats.valid   = true;
-            }
-
-            if (dev.hasThermostat()) {
-                QJsonObject hi = ifaces.value(QStringLiteral("thermostatInterface")).toObject();
-                // REST uses float celsius; convert to AHA integer steps (16=8°C .. 56=28°C)
-                // so existing ThermostatWidget display code works unchanged.
-                QString mode = hi.value(QStringLiteral("mode")).toString();
-                if (mode == QStringLiteral("off")) {
-                    dev.thermostatStats.targetTemp = 253;
-                } else if (mode == QStringLiteral("on")) {
-                    dev.thermostatStats.targetTemp = 254;
-                } else {
-                    // "temperature" mode: celsius → AHA steps: steps = (celsius - 8.0) * 2 + 16
-                    QJsonObject setPoint = hi.value(QStringLiteral("setPointTemperature")).toObject();
-                    double celsius = setPoint.value(QStringLiteral("celsius")).toDouble(8.0);
-                    dev.thermostatStats.targetTemp = qRound((celsius - 8.0) * 2.0) + 16;
-                }
-                // currentTemp in 0.1°C steps: REST gives °C float → multiply by 10
-                QJsonObject measured = hi.value(QStringLiteral("measuredTemperature")).toObject();
-                double measCelsius = measured.value(QStringLiteral("celsius")).toDouble(0.0);
-                dev.thermostatStats.currentTemp = qRound(measCelsius * 10.0);
-            }
-
-            if (dev.hasDimmer()) {
-                QJsonObject li = ifaces.value(QStringLiteral("levelControlInterface")).toObject();
-                // REST level is 0–100 (percentage); AHA was 0–255 for level, 0–100 for percent
-                int levelPct = li.value(QStringLiteral("level")).toInt(0);
-                dev.dimmerStats.levelPercent = levelPct;
-                // Synthesize AHA-style 0–255 level from percentage
-                dev.dimmerStats.level = qRound(levelPct * 255.0 / 100.0);
-                // on/off from onOffInterface if present, else treat level>0 as on
-                if (dev.hasSwitch())
-                    dev.dimmerStats.on = dev.switchStats.on;
-                else
-                    dev.dimmerStats.on = levelPct > 0;
-                dev.dimmerStats.valid = true;
-            }
-
-            if (dev.hasColorBulb()) {
-                QJsonObject ci = ifaces.value(QStringLiteral("colorControlInterface")).toObject();
-                // REST: hsColor.hue 0–360, hsColor.saturation 0–100; AHA: hue 0–359, sat 0–255
-                QJsonObject hsColor = ci.value(QStringLiteral("hsColor")).toObject();
-                dev.colorStats.hue = hsColor.value(QStringLiteral("hue")).toInt(0);
-                // Convert REST saturation 0–100 → AHA saturation 0–255
-                int satPct = hsColor.value(QStringLiteral("saturation")).toInt(0);
-                dev.colorStats.saturation = qRound(satPct * 255.0 / 100.0);
-                dev.colorStats.unmappedHue = dev.colorStats.hue;
-                dev.colorStats.unmappedSaturation = dev.colorStats.saturation;
-                dev.colorStats.colorTemperature = ci.value(QStringLiteral("colorTemperature")).toInt(0);
-                // Determine colorMode: "1" = hue/sat, "4" = color temperature
-                if (ci.contains(QStringLiteral("colorTemperature")) &&
-                    ci.value(QStringLiteral("colorTemperature")).toInt(0) > 0)
-                    dev.colorStats.colorMode = QStringLiteral("4");
-                else
-                    dev.colorStats.colorMode = QStringLiteral("1");
-                dev.colorStats.valid = true;
-            }
-
-            if (dev.hasBlind()) {
-                QJsonObject bi = ifaces.value(QStringLiteral("blindInterface")).toObject();
-                // REST blindAction: "moveUp"/"moveDown"/"stop"
-                // Map to AHA-style "open"/"close"/"stop" for BlindWidget
-                QString action = bi.value(QStringLiteral("blindAction")).toString();
-                if (action == QStringLiteral("moveUp"))
-                    dev.blindStats.mode = QStringLiteral("open");
-                else if (action == QStringLiteral("moveDown"))
-                    dev.blindStats.mode = QStringLiteral("close");
-                else
-                    dev.blindStats.mode = QStringLiteral("stop");
-                dev.blindStats.endPosition = bi.value(QStringLiteral("position")).toInt(0);
-                dev.blindStats.valid = true;
-            }
-
-            if (dev.hasHumidity()) {
-                QJsonObject humi = ifaces.value(QStringLiteral("humidityInterface")).toObject();
-                dev.humidityStats.humidity = qRound(humi.value(QStringLiteral("humidity")).toDouble(0.0));
-                dev.humidityStats.valid = true;
-            }
-
-            if (dev.hasAlarm()) {
-                QJsonObject ai = ifaces.value(QStringLiteral("alertInterface")).toObject();
-                dev.alarmStats.triggered = ai.value(QStringLiteral("state")).toString()
-                    == QStringLiteral("triggered");
-                dev.alarmStats.valid = true;
-            }
-
-            // Battery state
+            // Battery state (device-specific; read from device JSON, not interfaces)
             bool battLow = d.value(QStringLiteral("isBatteryLow")).toBool();
             if (dev.hasThermostat()) {
                 dev.thermostatStats.batteryLow = battLow;
@@ -729,42 +750,8 @@ FritzDeviceList FritzApi::parseDeviceListJson(const QByteArray &json) const
         if (!dev.unitUID.isEmpty() && unitMap.contains(dev.unitUID)) {
             QJsonObject u = unitMap.value(dev.unitUID);
             QJsonObject ifaces = u.value(QStringLiteral("interfaces")).toObject();
-            if (ifaces.contains(QStringLiteral("onOffInterface")))
-                dev.functionBitmask |= (1 << 9);
-            if (ifaces.contains(QStringLiteral("multimeterInterface")))
-                dev.functionBitmask |= (1 << 7);
-            if (ifaces.contains(QStringLiteral("temperatureInterface")))
-                dev.functionBitmask |= (1 << 8);
-            if (ifaces.contains(QStringLiteral("thermostatInterface")))
-                dev.functionBitmask |= (1 << 6);
-            if (ifaces.contains(QStringLiteral("levelControlInterface")))
-                dev.functionBitmask |= (1 << 13);
-            if (ifaces.contains(QStringLiteral("colorControlInterface")))
-                dev.functionBitmask |= (1 << 14);
-            if (ifaces.contains(QStringLiteral("blindInterface")))
-                dev.functionBitmask |= (1 << 18);
-
-            // Group switch state
-            if (dev.hasSwitch()) {
-                QJsonObject oi = ifaces.value(QStringLiteral("onOffInterface")).toObject();
-                dev.switchStats.on           = oi.value(QStringLiteral("active")).toBool();
-                dev.switchStats.locked       = oi.value(QStringLiteral("isLockedDeviceApi")).toBool();
-                dev.switchStats.deviceLocked = oi.value(QStringLiteral("isLockedDeviceLocal")).toBool();
-                dev.switchStats.valid = true;
-            }
-            // Group energy stats
-            if (dev.hasEnergyMeter()) {
-                QJsonObject mi = ifaces.value(QStringLiteral("multimeterInterface")).toObject();
-                dev.energyStats.power   = mi.value(QStringLiteral("power")).toDouble(0.0) / 1000.0;
-                dev.energyStats.energy  = mi.value(QStringLiteral("energy")).toDouble(0.0);
-                dev.energyStats.voltage = mi.value(QStringLiteral("voltage")).toDouble(0.0) / 1000.0;
-                dev.energyStats.valid   = true;
-            }
-            // Group temperature
-            if (dev.hasTemperature()) {
-                QJsonObject ti = ifaces.value(QStringLiteral("temperatureInterface")).toObject();
-                dev.temperature = ti.value(QStringLiteral("celsius")).toDouble(-273.0);
-            }
+            synthesizeFunctionBitmask(ifaces, dev);
+            parseInterfaceState(ifaces, dev);
         }
 
         // Map memberUnitUids → device AIns

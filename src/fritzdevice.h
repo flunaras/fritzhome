@@ -121,6 +121,21 @@ struct AlarmStats {
 };
 
 struct FritzDevice {
+    /// Primary device-type classification used for grouping, icon selection,
+    /// and bucket priority in the device tree.  Priority order: first match wins.
+    enum class PrimaryType {
+        Group,
+        ColorBulb,
+        Dimmer,
+        SmartPlug,      // switch + energy meter
+        Switch,
+        Thermostat,
+        Blind,
+        Alarm,
+        HumiditySensor,
+        Sensor          // fallback
+    };
+
     // Common
     QString ain;             // actor identification number (identifier attribute, spaces stripped)
     QString identifier;      // formatted AIN with spaces (original identifier attribute)
@@ -171,6 +186,20 @@ struct FritzDevice {
     bool hasHumidity()     const { return (functionBitmask & (1 << 20)) != 0; }
     bool hasAlarm()        const { return (functionBitmask & (1 << 4)) != 0; }
     bool isGroup()         const { return group; }
+
+    /// Classify device into its primary type bucket (first match wins).
+    PrimaryType primaryType() const {
+        if (isGroup())                               return PrimaryType::Group;
+        if (hasColorBulb())                          return PrimaryType::ColorBulb;
+        if (hasDimmer())                             return PrimaryType::Dimmer;
+        if (hasSwitch() && hasEnergyMeter())          return PrimaryType::SmartPlug;
+        if (hasSwitch())                             return PrimaryType::Switch;
+        if (hasThermostat())                         return PrimaryType::Thermostat;
+        if (hasBlind())                              return PrimaryType::Blind;
+        if (hasAlarm())                              return PrimaryType::Alarm;
+        if (hasHumidity())                           return PrimaryType::HumiditySensor;
+        return PrimaryType::Sensor;
+    }
 };
 
 using FritzDeviceList = QList<FritzDevice>;

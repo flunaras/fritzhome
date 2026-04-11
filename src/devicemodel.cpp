@@ -11,29 +11,35 @@
 
 QString DeviceModel::primaryTypeLabel(const FritzDevice &dev) const
 {
-    if (dev.isGroup())                               return i18n("Groups");
-    if (dev.hasColorBulb())                          return i18n("Color Bulbs");
-    if (dev.hasDimmer())                             return i18n("Dimmers");
-    if (dev.hasSwitch() && dev.hasEnergyMeter())     return i18n("Smart Plugs");
-    if (dev.hasSwitch())                             return i18n("Switches");
-    if (dev.hasThermostat())                         return i18n("Thermostats");
-    if (dev.hasBlind())                              return i18n("Blinds");
-    if (dev.hasAlarm())                              return i18n("Alarms");
-    if (dev.hasHumidity())                           return i18n("Humidity Sensors");
+    switch (dev.primaryType()) {
+    case FritzDevice::PrimaryType::Group:           return i18n("Groups");
+    case FritzDevice::PrimaryType::ColorBulb:       return i18n("Color Bulbs");
+    case FritzDevice::PrimaryType::Dimmer:          return i18n("Dimmers");
+    case FritzDevice::PrimaryType::SmartPlug:       return i18n("Smart Plugs");
+    case FritzDevice::PrimaryType::Switch:          return i18n("Switches");
+    case FritzDevice::PrimaryType::Thermostat:      return i18n("Thermostats");
+    case FritzDevice::PrimaryType::Blind:           return i18n("Blinds");
+    case FritzDevice::PrimaryType::Alarm:           return i18n("Alarms");
+    case FritzDevice::PrimaryType::HumiditySensor:  return i18n("Humidity Sensors");
+    case FritzDevice::PrimaryType::Sensor:          return i18n("Sensors");
+    }
     return i18n("Sensors");
 }
 
 QString DeviceModel::primaryIconName(const FritzDevice &dev) const
 {
-    if (dev.isGroup())                               return QStringLiteral(":/icons/device-group.svg");
-    if (dev.hasColorBulb())                          return QStringLiteral(":/icons/device-color-bulb.svg");
-    if (dev.hasDimmer())                             return QStringLiteral(":/icons/device-dimmer.svg");
-    if (dev.hasSwitch() && dev.hasEnergyMeter())     return QStringLiteral(":/icons/device-smart-plug.svg");
-    if (dev.hasSwitch())                             return QStringLiteral(":/icons/device-switch.svg");
-    if (dev.hasThermostat())                         return QStringLiteral(":/icons/device-thermostat.svg");
-    if (dev.hasBlind())                              return QStringLiteral(":/icons/device-blind.svg");
-    if (dev.hasAlarm())                              return QStringLiteral(":/icons/device-alarm.svg");
-    if (dev.hasHumidity())                           return QStringLiteral(":/icons/device-humidity.svg");
+    switch (dev.primaryType()) {
+    case FritzDevice::PrimaryType::Group:           return QStringLiteral(":/icons/device-group.svg");
+    case FritzDevice::PrimaryType::ColorBulb:       return QStringLiteral(":/icons/device-color-bulb.svg");
+    case FritzDevice::PrimaryType::Dimmer:          return QStringLiteral(":/icons/device-dimmer.svg");
+    case FritzDevice::PrimaryType::SmartPlug:       return QStringLiteral(":/icons/device-smart-plug.svg");
+    case FritzDevice::PrimaryType::Switch:          return QStringLiteral(":/icons/device-switch.svg");
+    case FritzDevice::PrimaryType::Thermostat:      return QStringLiteral(":/icons/device-thermostat.svg");
+    case FritzDevice::PrimaryType::Blind:           return QStringLiteral(":/icons/device-blind.svg");
+    case FritzDevice::PrimaryType::Alarm:           return QStringLiteral(":/icons/device-alarm.svg");
+    case FritzDevice::PrimaryType::HumiditySensor:  return QStringLiteral(":/icons/device-humidity.svg");
+    case FritzDevice::PrimaryType::Sensor:          return QStringLiteral(":/icons/device-sensor.svg");
+    }
     return QStringLiteral(":/icons/device-sensor.svg");
 }
 

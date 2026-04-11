@@ -940,6 +940,33 @@ void ChartWidget::updateDevice(const FritzDevice &device,
     // Detect whether the selected device has changed
     const bool deviceChanged = (m_device.ain != device.ain);
 
+    // Decide which tab to restore after the rebuild:
+    //   • Same device → keep whatever tab the user is currently on (local var)
+    //   • Different device → use the persisted QSettings preference so the user's
+    //     preferred tab (e.g. "Power") survives device switches
+    QString activeTabText;
+    if (!deviceChanged && m_tabs->currentIndex() >= 0) {
+        activeTabText = plainTabText(m_tabs->tabText(m_tabs->currentIndex()));
+    } else {
+        QSettings s;
+        activeTabText = s.value(QStringLiteral("ui/chartTab")).toString();
+    }
+
+    resetChartState(deviceChanged);
+
+    // Cache device for applyTimeWindow / rescale helpers
+    m_device = device;
+    m_memberDevices = memberDevices;
+
+    teardownTabs();
+    buildChartsForDevice(device, memberDevices, deviceChanged);
+    restoreTabAndApplyWindow(activeTabText);
+}
+
+// ── Chart rebuild helpers ─────────────────────────────────────────────────────
+
+void ChartWidget::resetChartState(bool deviceChanged)
+{
     // Reset resolution selection when switching to a different device
     if (deviceChanged) {
         m_groupHistoryMode = false;
@@ -961,22 +988,6 @@ void ChartWidget::updateDevice(const FritzDevice &device,
             m_tempLockCheckBox->blockSignals(false);
         }
     }
-
-    // Decide which tab to restore after the rebuild:
-    //   • Same device → keep whatever tab the user is currently on (local var)
-    //   • Different device → use the persisted QSettings preference so the user's
-    //     preferred tab (e.g. "Power") survives device switches
-    QString activeTabText;
-    if (!deviceChanged && m_tabs->currentIndex() >= 0) {
-        activeTabText = plainTabText(m_tabs->tabText(m_tabs->currentIndex()));
-    } else {
-        QSettings s;
-        activeTabText = s.value(QStringLiteral("ui/chartTab")).toString();
-    }
-
-    // Cache device for applyTimeWindow / rescale helpers
-    m_device = device;
-    m_memberDevices = memberDevices;
 
     // Null out stored axis/series/label pointers – they will be owned by the new charts
     m_tempAxisX       = nullptr;
@@ -1008,7 +1019,10 @@ void ChartWidget::updateDevice(const FritzDevice &device,
     // device-switch don't dereference the now-deleted widgets.
     m_powerLockCheckBox = nullptr;
     m_tempLockCheckBox  = nullptr;
+}
 
+void ChartWidget::teardownTabs()
+{
     // Re-parent both scroll bars back to this widget before destroying the old tabs,
     // so they are not deleted when the tab containers they were embedded in are deleted.
     // Reparent transient controls back to this widget to avoid them being
@@ -1057,7 +1071,12 @@ void ChartWidget::updateDevice(const FritzDevice &device,
         }
         delete w;
     }
+}
 
+void ChartWidget::buildChartsForDevice(const FritzDevice &device,
+                                        const FritzDeviceList &memberDevices,
+                                        bool deviceChanged)
+{
     if (device.isGroup()) {
         // For groups: show a multi-line temperature chart for all temp-capable members.
         // buildGroupTemperatureChart is a no-op if no member has temperature.
@@ -1100,7 +1119,10 @@ void ChartWidget::updateDevice(const FritzDevice &device,
         placeholder->setAlignment(Qt::AlignCenter);
         m_tabs->addTab(placeholder, i18n("Info"));
     }
+}
 
+void ChartWidget::restoreTabAndApplyWindow(const QString &activeTabText)
+{
     // Restore the previously active tab (or fall back to tab 0).
     {
         int restoreIdx = 0;
@@ -2271,6 +2293,242 @@ void ChartWidget::buildEnergyHistoryPlaceholder(const QStringList &viewLabels,
 }
 
 // ---------------------------------------------------------------------------
+// Energy History shared helpers
+// ---------------------------------------------------------------------------
+
+// Build a two-row axis overlay below the plot area using QGraphicsTextItem.
+// Row 1 (upper): one label per bar from monthBarLabels (day numbers or month
+// abbreviations depending on grid).
+// Row 2 (lower): one label per contiguous span of identical yearBarLabels
+// values (month names or year numbers).
+// The overlay items are repositioned on every plotAreaChanged signal.
+static void buildAxisOverlay(QChart *chart,
+                             QAbstractSeries *series,
+                             const QStringList &monthBarLabels,
+                             const QStringList &yearBarLabels)
+{
+    const int nBars = monthBarLabels.size();
+    if (nBars < 1)
+        return;
+
+    // Increase chart bottom margin so both overlay rows are visible.
+    QMargins m = chart->margins();
+    m.setBottom(36);
+    chart->setMargins(m);
+
+    // --- Row 1 labels (one per bar) ---
+    auto *monthLbls = new QVector<QGraphicsTextItem *>();
+    for (int i = 0; i < nBars; ++i) {
+        auto *lbl = new QGraphicsTextItem(monthBarLabels.at(i), chart);
+        lbl->setZValue(11);
+        lbl->setDefaultTextColor(QColor(80, 80, 80));
+        QFont f = lbl->font();
+        f.setPointSize(qMax(6, f.pointSize() - 1));
+        lbl->setFont(f);
+        monthLbls->append(lbl);
+    }
+
+    // --- Row 2 labels (one per contiguous span of identical values) ---
+    struct YearSpan { QString year; int first; int last; };
+    auto *yearSpans = new QVector<YearSpan>();
+    for (int i = 0; i < nBars; ++i) {
+        const QString &y = yearBarLabels.at(i);
+        if (!yearSpans->isEmpty() && yearSpans->last().year == y)
+            yearSpans->last().last = i;
+        else
+            yearSpans->append({y, i, i});
+    }
+    auto *yearLbls = new QVector<QGraphicsTextItem *>();
+    for (const YearSpan &ys : *yearSpans) {
+        auto *lbl = new QGraphicsTextItem(ys.year, chart);
+        lbl->setZValue(11);
+        lbl->setDefaultTextColor(QColor(60, 60, 60));
+        QFont f = lbl->font();
+        f.setPointSize(qMax(6, f.pointSize() - 1));
+        f.setBold(true);
+        lbl->setFont(f);
+        yearLbls->append(lbl);
+    }
+
+    auto updateOverlay = [chart, series, monthLbls, yearLbls, yearSpans, nBars]() {
+        const QRectF pa = chart->plotArea();
+        if (nBars < 1) return;
+
+        const double cx0 = chart->mapToPosition(QPointF(0, 0), series).x();
+        const double cx1 = (nBars > 1)
+            ? chart->mapToPosition(QPointF(1, 0), series).x()
+            : cx0 + pa.width();
+        const double slotW = cx1 - cx0;
+
+        const double monthH = monthLbls->isEmpty()
+            ? 16.0 : monthLbls->first()->boundingRect().height();
+        const double yearH = yearLbls->isEmpty()
+            ? 16.0 : yearLbls->first()->boundingRect().height();
+        constexpr double kAxisOverhang = 6.0;
+        const double gap    = (36.0 - kAxisOverhang - monthH - yearH) / 3.0;
+        const double monthY = pa.bottom() + kAxisOverhang + gap;
+        const double yearY  = monthY + monthH + gap;
+
+        for (int i = 0; i < monthLbls->size(); ++i) {
+            QGraphicsTextItem *lbl = monthLbls->at(i);
+            const double cx = chart->mapToPosition(QPointF(i, 0), series).x();
+            lbl->setPos(cx - lbl->boundingRect().width() * 0.5, monthY);
+        }
+        for (int j = 0; j < yearLbls->size(); ++j) {
+            const YearSpan &ys = yearSpans->at(j);
+            const double xLeft  = chart->mapToPosition(
+                QPointF(ys.first, 0), series).x() - slotW * 0.5;
+            const double xRight = chart->mapToPosition(
+                QPointF(ys.last,  0), series).x() + slotW * 0.5;
+            QGraphicsTextItem *lbl = yearLbls->at(j);
+            lbl->setPos((xLeft + xRight) * 0.5 - lbl->boundingRect().width() * 0.5, yearY);
+        }
+    };
+    updateOverlay();
+    QObject::connect(chart, &QChart::plotAreaChanged, chart,
+                     [updateOverlay](const QRectF &) { updateOverlay(); });
+}
+
+// Draw thin vertical separator lines at hour boundaries (grid==900 only).
+// Each line has a small hour label just below the plot area.
+// Lines are repositioned on every plotAreaChanged signal.
+static void buildHourSeparators(QChart *chart,
+                                QAbstractSeries *series,
+                                const QVector<int> &sepCatIndices,
+                                const QStringList &sepHourLabels)
+{
+    if (sepCatIndices.isEmpty())
+        return;
+
+    auto *sepLines  = new QVector<QGraphicsLineItem *>();
+    auto *sepLabels = new QVector<QGraphicsTextItem *>();
+    for (int i = 0; i < sepCatIndices.size(); ++i) {
+        auto *line = new QGraphicsLineItem(chart);
+        QPen pen(QColor(160, 160, 160, 180));
+        pen.setWidth(1);
+        line->setPen(pen);
+        line->setZValue(10);
+        sepLines->append(line);
+
+        auto *lbl = new QGraphicsTextItem(sepHourLabels.at(i), chart);
+        lbl->setZValue(11);
+        lbl->setDefaultTextColor(QColor(80, 80, 80));
+        QFont lblFont = lbl->font();
+        lblFont.setPointSize(qMax(6, lblFont.pointSize() - 1));
+        lbl->setFont(lblFont);
+        sepLabels->append(lbl);
+    }
+
+    auto updateLines = [chart, series, sepLines, sepLabels, sepCatIndices]() {
+        const QRectF pa = chart->plotArea();
+        const double slotW = (sepCatIndices.size() >= 1 && sepCatIndices.at(0) > 0)
+            ? chart->mapToPosition(QPointF(sepCatIndices.at(0),     0), series).x()
+            - chart->mapToPosition(QPointF(sepCatIndices.at(0) - 1, 0), series).x()
+            : pa.width();
+        for (int i = 0; i < sepLines->size(); ++i) {
+            const double cx = chart->mapToPosition(
+                QPointF(sepCatIndices.at(i), 0), series).x();
+            const double x = cx - slotW * 0.5;
+            sepLines->at(i)->setLine(x, pa.top(), x, pa.bottom());
+            QGraphicsTextItem *lbl = sepLabels->at(i);
+            lbl->setPos(x - lbl->boundingRect().width() * 0.5, pa.bottom() + 3);
+        }
+    };
+    updateLines();
+    QObject::connect(chart, &QChart::plotAreaChanged, chart,
+                     [updateLines](const QRectF &) { updateLines(); });
+}
+
+// Build the stacked-layout container (chart + combo overlay + total overlay),
+// install event filters, set member state, and insert the Energy History tab.
+void ChartWidget::finalizeEnergyHistoryTab(QChartView *chartView,
+                                           const QStringList &viewLabels,
+                                           int selectedIdx,
+                                           const QString &totalText,
+                                           int grid)
+{
+    chartView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+
+    // Combo (view selector) — top-left overlay
+    QComboBox *combo = new QComboBox();
+    for (const QString &label : viewLabels)
+        combo->addItem(label);
+    QWidget *comboOverlay = new QWidget();
+    comboOverlay->setAttribute(Qt::WA_TransparentForMouseEvents, false);
+    comboOverlay->setMouseTracking(true);
+    comboOverlay->setStyleSheet("background: transparent;");
+    {
+        QVBoxLayout *vl = new QVBoxLayout(comboOverlay);
+        vl->setContentsMargins(6, 4, 0, 0);
+        vl->setSpacing(0);
+        QHBoxLayout *hl = new QHBoxLayout();
+        hl->setSpacing(4);
+        QLabel *viewLabel = new QLabel(i18n("View:"));
+        viewLabel->setStyleSheet("background: transparent;");
+        hl->addWidget(viewLabel);
+        combo->setStyleSheet("QComboBox { background: palette(button); }");
+        hl->addWidget(combo);
+        hl->addStretch();
+        vl->addLayout(hl);
+        vl->addStretch();
+    }
+
+    // Total energy label — top-right overlay
+    QLabel *totalLabel = new QLabel(totalText);
+    {
+        QFont f = totalLabel->font();
+        f.setBold(true);
+        f.setPointSize(f.pointSize() + 2);
+        totalLabel->setFont(f);
+    }
+    totalLabel->setStyleSheet("background: transparent;");
+    QWidget *totalOverlay = new QWidget();
+    totalOverlay->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    totalOverlay->setStyleSheet("background: transparent;");
+    {
+        QVBoxLayout *vl = new QVBoxLayout(totalOverlay);
+        vl->setContentsMargins(0, 4, 10, 0);
+        vl->setSpacing(0);
+        QHBoxLayout *hl = new QHBoxLayout();
+        hl->addStretch();
+        hl->addWidget(totalLabel);
+        vl->addLayout(hl);
+        vl->addStretch();
+    }
+
+    QWidget *container = new QWidget();
+    container->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    QStackedLayout *stack = new QStackedLayout(container);
+    stack->setStackingMode(QStackedLayout::StackAll);
+    stack->addWidget(chartView);
+    stack->addWidget(comboOverlay);
+    stack->addWidget(totalOverlay);
+    comboOverlay->raise();
+    totalOverlay->raise();
+
+    // Install event filter on both layers so QHelpEvent triggers the tooltip
+    // regardless of which widget the cursor is over.
+    chartView->viewport()->installEventFilter(this);
+    comboOverlay->installEventFilter(this);
+
+    m_energyChartView = chartView;
+    m_energyResCombo = combo;
+    combo->blockSignals(true);
+    combo->setCurrentIndex(selectedIdx);
+    combo->blockSignals(false);
+    connect(combo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &ChartWidget::onEnergyResolutionChanged);
+
+    m_activeEnergyGrid = grid;
+
+    int insertAt = (m_energyHistoryTabIndex >= 0
+                    && m_energyHistoryTabIndex <= m_tabs->count())
+                   ? m_energyHistoryTabIndex
+                   : m_tabs->count();
+    m_energyHistoryTabIndex = m_tabs->insertTab(insertAt, container, i18n("Energy History"));
+}
+
+// ---------------------------------------------------------------------------
 // Energy History chart (getbasicdevicestats)
 // ---------------------------------------------------------------------------
 
@@ -2566,240 +2824,19 @@ void ChartWidget::buildEnergyHistoryChart(const DeviceBasicStats &stats)
     barSeries->attachAxis(axisY);
 
     // ---- Two-row axis overlay (grid==86400 "Rolling month", grid==2678400 "Last 2 years") ----
-    // Hide the built-in axis labels and replace them with two rows of
-    // QGraphicsTextItem overlays:
-    //   grid==86400:   Row 1 = day number per bar,         Row 2 = month name per span
-    //   grid==2678400: Row 1 = month abbreviation per bar, Row 2 = year number per span
     if ((view.grid == 86400 || view.grid == 2678400) && !monthBarLabels.isEmpty()) {
         axisX->setLabelsVisible(false);
-        // Increase the chart's bottom margin so both overlay rows are visible.
-        // Default Qt bottom margin (~7 px) only fits the axis ticks; two text rows
-        // need roughly 36 px.
-        QMargins m = chart->margins();
-        m.setBottom(36);
-        chart->setMargins(m);
-
-        const int nBars = monthBarLabels.size();
-
-        // --- Month labels (one per bar) ---
-        auto *monthLbls = new QVector<QGraphicsTextItem *>();
-        for (int i = 0; i < nBars; ++i) {
-            auto *lbl = new QGraphicsTextItem(monthBarLabels.at(i), chart);
-            lbl->setZValue(11);
-            lbl->setDefaultTextColor(QColor(80, 80, 80));
-            QFont f = lbl->font();
-            f.setPointSize(qMax(6, f.pointSize() - 1));
-            lbl->setFont(f);
-            monthLbls->append(lbl);
-        }
-
-        // --- Row 2 labels (one per contiguous span of identical yearBarLabels values) ---
-        // For grid==2678400: year numbers.  For grid==86400: month abbreviations.
-        struct YearSpan { QString year; int first; int last; };
-        auto *yearSpans = new QVector<YearSpan>();
-        for (int i = 0; i < nBars; ++i) {
-            const QString &y = yearBarLabels.at(i);
-            if (!yearSpans->isEmpty() && yearSpans->last().year == y)
-                yearSpans->last().last = i;
-            else
-                yearSpans->append({y, i, i});
-        }
-        auto *yearLbls = new QVector<QGraphicsTextItem *>();
-        for (const YearSpan &ys : *yearSpans) {
-            auto *lbl = new QGraphicsTextItem(ys.year, chart);
-            lbl->setZValue(11);
-            lbl->setDefaultTextColor(QColor(60, 60, 60));
-            QFont f = lbl->font();
-            f.setPointSize(qMax(6, f.pointSize() - 1));
-            f.setBold(true);
-            lbl->setFont(f);
-            yearLbls->append(lbl);
-        }
-
-        auto updateMonthOverlay = [chart, barSeries, monthLbls, yearLbls, yearSpans,
-                                   nBars]() {
-            const QRectF pa = chart->plotArea();
-            if (nBars < 1) return;
-
-            // Compute slot width from the center positions of bar 0 and bar 1.
-            const double cx0 = chart->mapToPosition(QPointF(0, 0), barSeries).x();
-            const double cx1 = (nBars > 1)
-                ? chart->mapToPosition(QPointF(1, 0), barSeries).x()
-                : cx0 + pa.width();
-            const double slotW = cx1 - cx0;
-
-            // Divide the bottom margin into three equal gaps so the spacing
-            // between the x-axis ticks, month row, year row, and widget frame
-            // is uniform.  axisOverhang accounts for the tick marks that extend
-            // below pa.bottom(); the remaining space is split into three gaps.
-            const double monthH = monthLbls->isEmpty()
-                ? 16.0 : monthLbls->first()->boundingRect().height();
-            const double yearH  = yearLbls->isEmpty()
-                ? 16.0 : yearLbls->first()->boundingRect().height();
-            constexpr double kAxisOverhang = 6.0;  // px below pa.bottom() used by axis ticks
-            const double gap    = (36.0 - kAxisOverhang - monthH - yearH) / 3.0;
-            const double monthY = pa.bottom() + kAxisOverhang + gap;
-            const double yearY  = monthY + monthH + gap;
-
-            // Row 1: month abbreviations.
-            for (int i = 0; i < monthLbls->size(); ++i) {
-                QGraphicsTextItem *lbl = monthLbls->at(i);
-                const double cx = chart->mapToPosition(QPointF(i, 0), barSeries).x();
-                const double lw = lbl->boundingRect().width();
-                lbl->setPos(cx - lw * 0.5, monthY);
-            }
-
-            // Row 2: year labels, each centered over its span of bars.
-            for (int j = 0; j < yearLbls->size(); ++j) {
-                const YearSpan &ys = yearSpans->at(j);
-                const double xLeft  = chart->mapToPosition(
-                    QPointF(ys.first, 0), barSeries).x() - slotW * 0.5;
-                const double xRight = chart->mapToPosition(
-                    QPointF(ys.last,  0), barSeries).x() + slotW * 0.5;
-                QGraphicsTextItem *lbl = yearLbls->at(j);
-                const double lw = lbl->boundingRect().width();
-                lbl->setPos((xLeft + xRight) * 0.5 - lw * 0.5, yearY);
-            }
-        };
-        updateMonthOverlay();
-        QObject::connect(chart, &QChart::plotAreaChanged, chart,
-                         [updateMonthOverlay](const QRectF &) { updateMonthOverlay(); });
+        buildAxisOverlay(chart, barSeries, monthBarLabels, yearBarLabels);
     }
 
     // ---- Hour separator lines (grid==900 only) ----
-    // Draw a thin vertical line at each hour boundary.  The lines are
-    // QGraphicsLineItem objects owned by the chart scene; they are repositioned
-    // whenever the plot area changes (e.g. on resize).
-    if (view.grid == 900 && !sepCatIndices.isEmpty()) {
-        auto *sepLines  = new QVector<QGraphicsLineItem *>();
-        auto *sepLabels = new QVector<QGraphicsTextItem *>();
-        for (int i = 0; i < sepCatIndices.size(); ++i) {
-            auto *line = new QGraphicsLineItem(chart);
-            QPen pen(QColor(160, 160, 160, 180));
-            pen.setWidth(1);
-            line->setPen(pen);
-            line->setZValue(10);
-            sepLines->append(line);
+    if (view.grid == 900)
+        buildHourSeparators(chart, barSeries, sepCatIndices, sepHourLabels);
 
-            auto *lbl = new QGraphicsTextItem(sepHourLabels.at(i), chart);
-            lbl->setZValue(11);
-            lbl->setDefaultTextColor(QColor(80, 80, 80));
-            QFont lblFont = lbl->font();
-            lblFont.setPointSize(qMax(6, lblFont.pointSize() - 1));
-            lbl->setFont(lblFont);
-            sepLabels->append(lbl);
-        }
-        // Use chart->mapToPosition() to get the exact pixel center of each
-        // :00 slot, then step back half a slot width to land on the boundary
-        // between the previous hour's last bar and this hour's first bar.
-        auto updateSepLines = [chart, barSeries, sepLines, sepLabels, sepCatIndices]() {
-            const QRectF pa = chart->plotArea();
-            // mapToPosition gives the center of slot idx in scene coordinates.
-            // Half a slot width = distance between adjacent slot centers / 2.
-            // We use two adjacent slots to compute the actual slot width so
-            // the result is correct even if Qt adds edge padding.
-            const double slotW = (sepCatIndices.size() >= 1 && sepCatIndices.at(0) > 0)
-                ? chart->mapToPosition(QPointF(sepCatIndices.at(0),     0), barSeries).x()
-                - chart->mapToPosition(QPointF(sepCatIndices.at(0) - 1, 0), barSeries).x()
-                : pa.width();   // fallback (should never trigger)
-            for (int i = 0; i < sepLines->size(); ++i) {
-                const double cx = chart->mapToPosition(
-                                      QPointF(sepCatIndices.at(i), 0), barSeries).x();
-                const double x = cx - slotW * 0.5;
-                sepLines->at(i)->setLine(x, pa.top(), x, pa.bottom());
-
-                // Position label just below the plot area, horizontally centered on x.
-                QGraphicsTextItem *lbl = sepLabels->at(i);
-                const double lw = lbl->boundingRect().width();
-                lbl->setPos(x - lw * 0.5, pa.bottom() + 3);
-            }
-        };
-        updateSepLines();
-        QObject::connect(chart, &QChart::plotAreaChanged, chart,
-                         [updateSepLines](const QRectF &) { updateSepLines(); });
-    }
-
-    // ---- Wrap chart in a stacked container with overlaid controls ----
-    // The view selector (top-left) and total energy value (top-right) are
-    // overlaid directly on the chart using QStackedLayout::StackAll so the
-    // chart fills the entire tab area without a separate header row.
+    // ---- Wrap chart and set up tooltip ----
     QChartView *chartView = makeChartView(chart);
-    chartView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-
-    // Combo (view selector) — top-left overlay
-    QComboBox *combo = new QComboBox();
-    for (int i = 0; i < nViews; ++i)
-        combo->addItem(i18n(views[i].label));
-    QWidget *comboOverlay = new QWidget();
-    comboOverlay->setAttribute(Qt::WA_TransparentForMouseEvents, false);
-    comboOverlay->setMouseTracking(true);          // receive MouseMove without button press
-    comboOverlay->setStyleSheet("background: transparent;");
-    {
-        QVBoxLayout *vl = new QVBoxLayout(comboOverlay);
-        vl->setContentsMargins(6, 4, 0, 0);
-        vl->setSpacing(0);
-        QHBoxLayout *hl = new QHBoxLayout();
-        hl->setSpacing(4);
-        QLabel *viewLabel = new QLabel(i18n("View:"));
-        viewLabel->setStyleSheet("background: transparent;");
-        hl->addWidget(viewLabel);
-        combo->setStyleSheet("QComboBox { background: palette(button); }");
-        hl->addWidget(combo);
-        hl->addStretch();
-        vl->addLayout(hl);
-        vl->addStretch();
-    }
-
-    // Window total label — top-right overlay
-    QString totalText = useKwh
-        ? QString("%1 kWh").arg(rawTotal / 1000.0, 0, 'f', 2)
-        : QString("%1 Wh").arg(rawTotal, 0, 'f', 1);
-    QLabel *totalLabel = new QLabel(totalText);
-    {
-        QFont f = totalLabel->font();
-        f.setBold(true);
-        f.setPointSize(f.pointSize() + 2);
-        totalLabel->setFont(f);
-    }
-    totalLabel->setStyleSheet("background: transparent;");
-    QWidget *totalOverlay = new QWidget();
-    totalOverlay->setAttribute(Qt::WA_TransparentForMouseEvents, true);
-    totalOverlay->setStyleSheet("background: transparent;");
-    {
-        QVBoxLayout *vl = new QVBoxLayout(totalOverlay);
-        vl->setContentsMargins(0, 4, 10, 0);
-        vl->setSpacing(0);
-        QHBoxLayout *hl = new QHBoxLayout();
-        hl->addStretch();
-        hl->addWidget(totalLabel);
-        vl->addLayout(hl);
-        vl->addStretch();
-    }
-
-    QWidget *container = new QWidget();
-    container->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    QStackedLayout *stack = new QStackedLayout(container);
-    stack->setStackingMode(QStackedLayout::StackAll);
-    stack->addWidget(chartView);
-    stack->addWidget(comboOverlay);
-    stack->addWidget(totalOverlay);
-    comboOverlay->raise();
-    totalOverlay->raise();
-
-    // No pie mode combo — labels always show both absolute and percent values.
 
     // ---- Hover tooltip on each bar ----
-    // We use the QHelpEvent mechanism (eventFilter below) to show the tooltip
-    // when the mouse first enters a bar.  When moving between bars, Qt Charts
-    // may fire hovered(true, newIndex) without an intervening hovered(false) so
-    // no QHelpEvent fires and we must update the popup ourselves.
-    //
-    // Qt5 QToolTip reuses the same popup label and calls setText() on it, which
-    // scrambles the window geometry when the text width changes.  The fix is to
-    // call showText(pos, "") first — in Qt5 this destroys the popup synchronously
-    // — then immediately call showText(pos, newTip) to create a fresh window.
-    // In Qt6 the empty-string call is also synchronous so this is safe on both.
-    //
     // barValues holds the unscaled values; read from it rather than QBarSet
     // so the tooltip works identically on Qt5 and Qt6.
     auto onBarHovered = [this, tooltipLabels, barValues, useKwh, chartView](bool status, int index) {
@@ -2809,7 +2846,6 @@ void ChartWidget::buildEnergyHistoryChart(const DeviceBasicStats &stats)
             return;
         }
         if (index < 0 || index >= tooltipLabels.size()) return;
-        // Separator bar has an empty tooltip label — skip it
         if (tooltipLabels.at(index).isEmpty()) {
             m_energyBarTooltip.clear();
             QToolTip::hideText();
@@ -2824,37 +2860,22 @@ void ChartWidget::buildEnergyHistoryChart(const DeviceBasicStats &stats)
         const bool changed = (newTip != m_energyBarTooltip);
         m_energyBarTooltip = newTip;
         if (changed && QToolTip::isVisible()) {
-            // Destroy the existing popup by showing empty text, then immediately
-            // show the new text — creates a clean new window at the right size.
             QToolTip::showText(QCursor::pos(), QString(), chartView);
             QToolTip::showText(QCursor::pos(), newTip,   chartView);
         }
     };
     connect(barSet, &QBarSet::hovered, this, onBarHovered);
-    // The comboOverlay widget is stacked above chartView (StackAll) and has
-    // WA_TransparentForMouseEvents=false so it receives QHelpEvent (tooltip)
-    // when the cursor is over the chart area.  Install the filter on both so
-    // the tooltip fires regardless of which widget the cursor is over.
-    // Mouse move events from comboOverlay are forwarded to the chart viewport
-    // by the event filter so that QBarSet::hovered signals still fire.
-    chartView->viewport()->installEventFilter(this);
-    comboOverlay->installEventFilter(this);
 
-    m_energyChartView = chartView;
-    m_energyResCombo = combo;
-    combo->blockSignals(true);
-    combo->setCurrentIndex(selectedIdx);
-    combo->blockSignals(false);
-    connect(combo, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, &ChartWidget::onEnergyResolutionChanged);
+    // ---- Finalize container, overlays, and insert tab ----
+    QStringList viewLabelStrings;
+    for (int i = 0; i < nViews; ++i)
+        viewLabelStrings << i18n(views[i].label);
 
-    m_activeEnergyGrid = view.grid;
+    QString totalText = useKwh
+        ? QString("%1 kWh").arg(rawTotal / 1000.0, 0, 'f', 2)
+        : QString("%1 Wh").arg(rawTotal, 0, 'f', 1);
 
-    int insertAt = (m_energyHistoryTabIndex >= 0
-                    && m_energyHistoryTabIndex <= m_tabs->count())
-                   ? m_energyHistoryTabIndex
-                   : m_tabs->count();
-    m_energyHistoryTabIndex = m_tabs->insertTab(insertAt, container, i18n("Energy History"));
+    finalizeEnergyHistoryTab(chartView, viewLabelStrings, selectedIdx, totalText, view.grid);
 }
 
 // ---------------------------------------------------------------------------
@@ -3168,176 +3189,16 @@ void ChartWidget::buildEnergyHistoryChartStacked(
     // ---- Two-row axis overlay (grid==86400 or grid==2678400) ----
     if ((view.grid == 86400 || view.grid == 2678400) && !monthBarLabels.isEmpty()) {
         axisX->setLabelsVisible(false);
-        QMargins marg = chart->margins();
-        marg.setBottom(36);
-        chart->setMargins(marg);
-
-        const int nBars = monthBarLabels.size();
-        auto *monthLbls = new QVector<QGraphicsTextItem *>();
-        for (int i = 0; i < nBars; ++i) {
-            auto *lbl = new QGraphicsTextItem(monthBarLabels.at(i), chart);
-            lbl->setZValue(11);
-            lbl->setDefaultTextColor(QColor(80, 80, 80));
-            QFont f = lbl->font();
-            f.setPointSize(qMax(6, f.pointSize() - 1));
-            lbl->setFont(f);
-            monthLbls->append(lbl);
-        }
-        struct YearSpan { QString year; int first; int last; };
-        auto *yearSpans = new QVector<YearSpan>();
-        for (int i = 0; i < nBars; ++i) {
-            const QString &y = yearBarLabels.at(i);
-            if (!yearSpans->isEmpty() && yearSpans->last().year == y)
-                yearSpans->last().last = i;
-            else
-                yearSpans->append({y, i, i});
-        }
-        auto *yearLbls = new QVector<QGraphicsTextItem *>();
-        for (const YearSpan &ys : *yearSpans) {
-            auto *lbl = new QGraphicsTextItem(ys.year, chart);
-            lbl->setZValue(11);
-            lbl->setDefaultTextColor(QColor(60, 60, 60));
-            QFont f = lbl->font();
-            f.setPointSize(qMax(6, f.pointSize() - 1));
-            f.setBold(true);
-            lbl->setFont(f);
-            yearLbls->append(lbl);
-        }
-        auto updateMonthOverlay = [chart, barSeries, monthLbls, yearLbls, yearSpans, nBars]() {
-            const QRectF pa = chart->plotArea();
-            if (nBars < 1) return;
-            const double cx0 = chart->mapToPosition(QPointF(0, 0), barSeries).x();
-            const double cx1 = (nBars > 1)
-                ? chart->mapToPosition(QPointF(1, 0), barSeries).x()
-                : cx0 + pa.width();
-            const double slotW = cx1 - cx0;
-            const double monthH = monthLbls->isEmpty() ? 16.0 : monthLbls->first()->boundingRect().height();
-            const double yearH  = yearLbls->isEmpty()  ? 16.0 : yearLbls->first()->boundingRect().height();
-            constexpr double kAxisOverhang = 6.0;
-            const double gap    = (36.0 - kAxisOverhang - monthH - yearH) / 3.0;
-            const double monthY = pa.bottom() + kAxisOverhang + gap;
-            const double yearY  = monthY + monthH + gap;
-            for (int i = 0; i < monthLbls->size(); ++i) {
-                QGraphicsTextItem *lbl = monthLbls->at(i);
-                const double cx = chart->mapToPosition(QPointF(i, 0), barSeries).x();
-                lbl->setPos(cx - lbl->boundingRect().width() * 0.5, monthY);
-            }
-            for (int j = 0; j < yearLbls->size(); ++j) {
-                const YearSpan &ys = yearSpans->at(j);
-                const double xLeft  = chart->mapToPosition(QPointF(ys.first, 0), barSeries).x() - slotW * 0.5;
-                const double xRight = chart->mapToPosition(QPointF(ys.last,  0), barSeries).x() + slotW * 0.5;
-                QGraphicsTextItem *lbl = yearLbls->at(j);
-                lbl->setPos((xLeft + xRight) * 0.5 - lbl->boundingRect().width() * 0.5, yearY);
-            }
-        };
-        updateMonthOverlay();
-        QObject::connect(chart, &QChart::plotAreaChanged, chart,
-                         [updateMonthOverlay](const QRectF &) { updateMonthOverlay(); });
+        buildAxisOverlay(chart, barSeries, monthBarLabels, yearBarLabels);
     }
 
     // ---- Hour separator lines (grid==900 only) ----
-    if (view.grid == 900 && !sepCatIndices.isEmpty()) {
-        auto *sepLines  = new QVector<QGraphicsLineItem *>();
-        auto *sepLabels = new QVector<QGraphicsTextItem *>();
-        for (int i = 0; i < sepCatIndices.size(); ++i) {
-            auto *line = new QGraphicsLineItem(chart);
-            QPen pen(QColor(160, 160, 160, 180));
-            pen.setWidth(1);
-            line->setPen(pen);
-            line->setZValue(10);
-            sepLines->append(line);
-            auto *lbl = new QGraphicsTextItem(sepHourLabels.at(i), chart);
-            lbl->setZValue(11);
-            lbl->setDefaultTextColor(QColor(80, 80, 80));
-            QFont lblFont = lbl->font();
-            lblFont.setPointSize(qMax(6, lblFont.pointSize() - 1));
-            lbl->setFont(lblFont);
-            sepLabels->append(lbl);
-        }
-        auto updateSepLines = [chart, barSeries, sepLines, sepLabels, sepCatIndices]() {
-            const QRectF pa = chart->plotArea();
-            const double slotW = (sepCatIndices.size() >= 1 && sepCatIndices.at(0) > 0)
-                ? chart->mapToPosition(QPointF(sepCatIndices.at(0),     0), barSeries).x()
-                - chart->mapToPosition(QPointF(sepCatIndices.at(0) - 1, 0), barSeries).x()
-                : pa.width();
-            for (int i = 0; i < sepLines->size(); ++i) {
-                const double cx = chart->mapToPosition(
-                    QPointF(sepCatIndices.at(i), 0), barSeries).x();
-                const double x = cx - slotW * 0.5;
-                sepLines->at(i)->setLine(x, pa.top(), x, pa.bottom());
-                QGraphicsTextItem *lbl = sepLabels->at(i);
-                lbl->setPos(x - lbl->boundingRect().width() * 0.5, pa.bottom() + 3);
-            }
-        };
-        updateSepLines();
-        QObject::connect(chart, &QChart::plotAreaChanged, chart,
-                         [updateSepLines](const QRectF &) { updateSepLines(); });
-    }
+    if (view.grid == 900)
+        buildHourSeparators(chart, barSeries, sepCatIndices, sepHourLabels);
 
-    // ---- Overlay layout: chartView + comboOverlay + totalOverlay ----
+    // ---- Wrap chart and set up per-member tooltips ----
     QChartView *chartView = makeChartView(chart);
-    chartView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
-    QComboBox *combo = new QComboBox();
-    for (int i = 0; i < nViews; ++i)
-        combo->addItem(i18n(views[i].label));
-    QWidget *comboOverlay = new QWidget();
-    comboOverlay->setAttribute(Qt::WA_TransparentForMouseEvents, false);
-    comboOverlay->setMouseTracking(true);          // receive MouseMove without button press
-    comboOverlay->setStyleSheet("background: transparent;");
-    {
-        QVBoxLayout *vl = new QVBoxLayout(comboOverlay);
-        vl->setContentsMargins(6, 4, 0, 0);
-        vl->setSpacing(0);
-        QHBoxLayout *hl = new QHBoxLayout();
-        hl->setSpacing(4);
-        QLabel *viewLabel = new QLabel(i18n("View:"));
-        viewLabel->setStyleSheet("background: transparent;");
-        hl->addWidget(viewLabel);
-        combo->setStyleSheet("QComboBox { background: palette(button); }");
-        hl->addWidget(combo);
-        hl->addStretch();
-        vl->addLayout(hl);
-        vl->addStretch();
-    }
-
-    // Grand total overlay (top-right)
-    QString totalText = useKwh
-        ? QString("%1 kWh").arg(grandTotal / 1000.0, 0, 'f', 2)
-        : QString("%1 Wh").arg(grandTotal, 0, 'f', 1);
-    QLabel *totalLabel = new QLabel(totalText);
-    {
-        QFont f = totalLabel->font();
-        f.setBold(true);
-        f.setPointSize(f.pointSize() + 2);
-        totalLabel->setFont(f);
-    }
-    totalLabel->setStyleSheet("background: transparent;");
-    QWidget *totalOverlay = new QWidget();
-    totalOverlay->setAttribute(Qt::WA_TransparentForMouseEvents, true);
-    totalOverlay->setStyleSheet("background: transparent;");
-    {
-        QVBoxLayout *vl = new QVBoxLayout(totalOverlay);
-        vl->setContentsMargins(0, 4, 10, 0);
-        vl->setSpacing(0);
-        QHBoxLayout *hl = new QHBoxLayout();
-        hl->addStretch();
-        hl->addWidget(totalLabel);
-        vl->addLayout(hl);
-        vl->addStretch();
-    }
-
-    QWidget *container = new QWidget();
-    container->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    QStackedLayout *stack = new QStackedLayout(container);
-    stack->setStackingMode(QStackedLayout::StackAll);
-    stack->addWidget(chartView);
-    stack->addWidget(comboOverlay);
-    stack->addWidget(totalOverlay);
-    comboOverlay->raise();
-    totalOverlay->raise();
-
-    // ---- Hover tooltips ----
     // Each QBarSet gets its own hovered lambda; tooltip format includes member name.
     for (int m = 0; m < nMembers; ++m) {
         const QString memberName = memberStats.at(m).first;
@@ -3372,28 +3233,17 @@ void ChartWidget::buildEnergyHistoryChartStacked(
         };
         connect(bs, &QBarSet::hovered, this, onBarHovered);
     }
-    // Install event filter on both layers so QHelpEvent triggers the tooltip
-    // regardless of which widget the cursor is over.
-    // Mouse move events from comboOverlay are forwarded to the chart viewport
-    // by the event filter so that QBarSet::hovered signals still fire.
-    chartView->viewport()->installEventFilter(this);
-    comboOverlay->installEventFilter(this);
 
-    m_energyChartView = chartView;
-    m_energyResCombo = combo;
-    combo->blockSignals(true);
-    combo->setCurrentIndex(selectedIdx);
-    combo->blockSignals(false);
-    connect(combo, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, &ChartWidget::onEnergyResolutionChanged);
+    // ---- Finalize container, overlays, and insert tab ----
+    QStringList viewLabelStrings;
+    for (int i = 0; i < nViews; ++i)
+        viewLabelStrings << i18n(views[i].label);
 
-    m_activeEnergyGrid = view.grid;
+    QString totalText = useKwh
+        ? QString("%1 kWh").arg(grandTotal / 1000.0, 0, 'f', 2)
+        : QString("%1 Wh").arg(grandTotal, 0, 'f', 1);
 
-    int insertAt = (m_energyHistoryTabIndex >= 0
-                    && m_energyHistoryTabIndex <= m_tabs->count())
-                   ? m_energyHistoryTabIndex
-                   : m_tabs->count();
-    m_energyHistoryTabIndex = m_tabs->insertTab(insertAt, container, i18n("Energy History"));
+    finalizeEnergyHistoryTab(chartView, viewLabelStrings, selectedIdx, totalText, view.grid);
 }
 
 // ---------------------------------------------------------------------------

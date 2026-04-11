@@ -70,26 +70,18 @@ enum PanelIndex {
 static QPixmap deviceHeadingPixmap(const FritzDevice &dev)
 {
     QString path;
-    if (dev.isGroup())
-        path = QStringLiteral(":/icons/device-group.svg");
-    else if (dev.hasColorBulb())
-        path = QStringLiteral(":/icons/device-color-bulb.svg");
-    else if (dev.hasDimmer())
-        path = QStringLiteral(":/icons/device-dimmer.svg");
-    else if (dev.hasSwitch() && dev.hasEnergyMeter())
-        path = QStringLiteral(":/icons/device-smart-plug.svg");
-    else if (dev.hasSwitch())
-        path = QStringLiteral(":/icons/device-switch.svg");
-    else if (dev.hasThermostat())
-        path = QStringLiteral(":/icons/device-thermostat.svg");
-    else if (dev.hasBlind())
-        path = QStringLiteral(":/icons/device-blind.svg");
-    else if (dev.hasAlarm())
-        path = QStringLiteral(":/icons/device-alarm.svg");
-    else if (dev.hasHumidity())
-        path = QStringLiteral(":/icons/device-humidity.svg");
-    else
-        path = QStringLiteral(":/icons/device-sensor.svg");
+    switch (dev.primaryType()) {
+    case FritzDevice::PrimaryType::Group:           path = QStringLiteral(":/icons/device-group.svg");      break;
+    case FritzDevice::PrimaryType::ColorBulb:       path = QStringLiteral(":/icons/device-color-bulb.svg"); break;
+    case FritzDevice::PrimaryType::Dimmer:          path = QStringLiteral(":/icons/device-dimmer.svg");     break;
+    case FritzDevice::PrimaryType::SmartPlug:       path = QStringLiteral(":/icons/device-smart-plug.svg"); break;
+    case FritzDevice::PrimaryType::Switch:          path = QStringLiteral(":/icons/device-switch.svg");     break;
+    case FritzDevice::PrimaryType::Thermostat:      path = QStringLiteral(":/icons/device-thermostat.svg"); break;
+    case FritzDevice::PrimaryType::Blind:           path = QStringLiteral(":/icons/device-blind.svg");      break;
+    case FritzDevice::PrimaryType::Alarm:           path = QStringLiteral(":/icons/device-alarm.svg");      break;
+    case FritzDevice::PrimaryType::HumiditySensor:  path = QStringLiteral(":/icons/device-humidity.svg");   break;
+    case FritzDevice::PrimaryType::Sensor:          path = QStringLiteral(":/icons/device-sensor.svg");     break;
+    }
     return QIcon(path).pixmap(32, 32);
 }
 
@@ -117,8 +109,29 @@ MainWindow::MainWindow(QWidget *parent)
 
     m_splitter = new QSplitter(Qt::Horizontal, central);
 
-    // ── Left: device tree + polling interval ──────────────────────────────────
-    QWidget *leftPanel = new QWidget(m_splitter);
+    setupDeviceTree(m_splitter);
+    setupControlPanel(m_splitter);
+
+    m_splitter->setStretchFactor(0, 0);
+    m_splitter->setStretchFactor(1, 1);
+    m_splitter->setSizes({340, 760});
+
+    centralLayout->addWidget(m_splitter);
+    setCentralWidget(central);
+
+    setupStatusBar();
+    setupActions();
+    wireSignals();
+    restoreSettings();
+}
+
+MainWindow::~MainWindow() = default;
+
+// ── Constructor helpers ───────────────────────────────────────────────────────
+
+void MainWindow::setupDeviceTree(QSplitter *splitter)
+{
+    QWidget *leftPanel = new QWidget(splitter);
     QVBoxLayout *leftLayout = new QVBoxLayout(leftPanel);
     leftLayout->setContentsMargins(0, 0, 0, 0);
     leftLayout->setSpacing(4);
@@ -134,35 +147,34 @@ MainWindow::MainWindow(QWidget *parent)
     m_deviceTree->setUniformRowHeights(false);
     m_deviceTree->setSortingEnabled(false);  // no proxy model, keep insertion order
     m_deviceTree->setMinimumWidth(320);
-    // Set Interactive resize mode
     m_deviceTree->header()->setSectionResizeMode(QHeaderView::Interactive);
     m_deviceTree->header()->setMinimumSectionSize(50);
     leftLayout->addWidget(m_deviceTree, 1);
 
     // Polling interval row below the tree
-    {
-        QHBoxLayout *intervalRow = new QHBoxLayout();
-        intervalRow->setContentsMargins(4, 2, 4, 2);
-        QLabel *intervalLabel = new QLabel(i18n("Refresh interval:"), leftPanel);
-        m_intervalSpin = new QSpinBox(leftPanel);
-        m_intervalSpin->setRange(2, 300);
-        m_intervalSpin->setValue(m_pollingInterval);
-        m_intervalSpin->setSuffix(i18n(" s"));
-        m_intervalSpin->setToolTip(i18n("How often to refresh device states (2–300 seconds)"));
-        intervalRow->addWidget(intervalLabel);
-        intervalRow->addWidget(m_intervalSpin, 1);
-        leftLayout->addLayout(intervalRow);
-    }
+    QHBoxLayout *intervalRow = new QHBoxLayout();
+    intervalRow->setContentsMargins(4, 2, 4, 2);
+    QLabel *intervalLabel = new QLabel(i18n("Refresh interval:"), leftPanel);
+    m_intervalSpin = new QSpinBox(leftPanel);
+    m_intervalSpin->setRange(2, 300);
+    m_intervalSpin->setValue(m_pollingInterval);
+    m_intervalSpin->setSuffix(i18n(" s"));
+    m_intervalSpin->setToolTip(i18n("How often to refresh device states (2–300 seconds)"));
+    intervalRow->addWidget(intervalLabel);
+    intervalRow->addWidget(m_intervalSpin, 1);
+    leftLayout->addLayout(intervalRow);
 
-    m_splitter->addWidget(leftPanel);
+    splitter->addWidget(leftPanel);
+}
 
-    // ── Right: control panel + charts ─────────────────────────────────────────
-    QWidget *rightPanel = new QWidget(m_splitter);
+void MainWindow::setupControlPanel(QSplitter *splitter)
+{
+    QWidget *rightPanel = new QWidget(splitter);
     QVBoxLayout *rightLayout = new QVBoxLayout(rightPanel);
     rightLayout->setContentsMargins(4, 4, 4, 4);
     rightLayout->setSpacing(6);
 
-    // Device name heading (icon + text in a horizontal row) ──────────────────
+    // Device name heading (icon + text in a horizontal row)
     m_deviceIconLabel = new QLabel(rightPanel);
     m_deviceIconLabel->setFixedSize(32, 32);
     m_deviceIconLabel->setAlignment(Qt::AlignCenter);
@@ -186,7 +198,7 @@ MainWindow::MainWindow(QWidget *parent)
     nameRow->addWidget(m_deviceNameLabel, 1);
     rightLayout->addLayout(nameRow);
 
-    // Control stack ────────────────────────────────────────────────────────────
+    // Control stack
     m_controlStack = new QStackedWidget(rightPanel);
 
     // 0: empty placeholder
@@ -223,27 +235,18 @@ MainWindow::MainWindow(QWidget *parent)
     });
     rightLayout->addWidget(m_controlStack, 0);
 
-    // Charts ───────────────────────────────────────────────────────────────────
+    // Charts
     m_chartWidget = new ChartWidget(rightPanel);
     m_chartWidget->setMinimumHeight(300);
     m_chartWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     rightLayout->addWidget(m_chartWidget, 1);
 
-    m_splitter->addWidget(rightPanel);
-    m_splitter->setStretchFactor(0, 0);
-    m_splitter->setStretchFactor(1, 1);
-    m_splitter->setSizes({340, 760});
+    splitter->addWidget(rightPanel);
+}
 
-    centralLayout->addWidget(m_splitter);
-    setCentralWidget(central);
-
-    // ── Status bar ────────────────────────────────────────────────────────────
-    setupStatusBar();
-
-    // ── Actions / menus / toolbar ─────────────────────────────────────────────
-    setupActions();
-
-    // ── Wire API signals ──────────────────────────────────────────────────────
+void MainWindow::wireSignals()
+{
+    // API signals
     connect(m_api, &FritzApi::loginSuccess,
             this,  &MainWindow::onLoginSuccess);
     connect(m_api, &FritzApi::loginFailed,
@@ -310,11 +313,11 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_api, &FritzApi::commandFailed,
             this,  &MainWindow::onCommandFailed);
 
-    // ── Wire tree selection ───────────────────────────────────────────────────
+    // Tree selection
     connect(m_deviceTree->selectionModel(), &QItemSelectionModel::currentChanged,
             this, &MainWindow::onDeviceSelected);
 
-    // ── Wire polling interval spinbox ─────────────────────────────────────────
+    // Polling interval spinbox
     connect(m_intervalSpin, QOverload<int>::of(&QSpinBox::valueChanged),
             this, [this](int seconds) {
                 m_pollingInterval = seconds;
@@ -323,8 +326,10 @@ MainWindow::MainWindow(QWidget *parent)
                 if (m_api->isLoggedIn())
                     m_api->startPolling(seconds * 1000);
             });
+}
 
-    // ── Restore saved UI layout ───────────────────────────────────────────────
+void MainWindow::restoreSettings()
+{
     QSettings s;
     if (s.contains(QStringLiteral("ui/geometry")))
         restoreGeometry(s.value(QStringLiteral("ui/geometry")).toByteArray());
@@ -334,18 +339,14 @@ MainWindow::MainWindow(QWidget *parent)
         m_splitter->restoreState(s.value(QStringLiteral("ui/splitterState")).toByteArray());
     // Restore saved polling interval into spinbox (block signal so we don't
     // call startPolling before login completes).
-    {
-        const int savedInterval = s.value(QStringLiteral("connection/interval"), 10).toInt();
-        m_pollingInterval = savedInterval;
-        m_intervalSpin->blockSignals(true);
-        m_intervalSpin->setValue(savedInterval);
-        m_intervalSpin->blockSignals(false);
-    }
+    const int savedInterval = s.value(QStringLiteral("connection/interval"), 10).toInt();
+    m_pollingInterval = savedInterval;
+    m_intervalSpin->blockSignals(true);
+    m_intervalSpin->setValue(savedInterval);
+    m_intervalSpin->blockSignals(false);
     // Header state is restored on first data arrival (onDeviceListUpdated),
     // because the model must be populated before restoreState is reliable.
 }
-
-MainWindow::~MainWindow() = default;
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
@@ -576,6 +577,154 @@ void MainWindow::onSessionExpired()
     setStatusMessage(i18n("Session expired — reconnecting to %1…", m_api->host()));
 }
 
+// ── Tree state save/restore helpers ───────────────────────────────────────────
+
+QSet<QString> MainWindow::saveTreeState() const
+{
+    QSet<QString> expandedGroups;
+    const int groupCount = m_model->rowCount();
+    for (int g = 0; g < groupCount; ++g) {
+        const QModelIndex gi = m_model->index(g, 0);
+        if (m_deviceTree->isExpanded(gi))
+            expandedGroups.insert(m_model->data(gi, Qt::UserRole).toString());
+    }
+    return expandedGroups;
+}
+
+void MainWindow::restoreTreeState(const QSet<QString> &expandedGroups, bool expandAll)
+{
+    const int groupCount = m_model->rowCount();
+    for (int g = 0; g < groupCount; ++g) {
+        const QModelIndex gi = m_model->index(g, 0);
+        const QString label  = m_model->data(gi, Qt::UserRole).toString();
+        m_deviceTree->setExpanded(gi, expandAll || expandedGroups.contains(label));
+    }
+}
+
+void MainWindow::initColumnSizes(const FritzDeviceList &devices)
+{
+    if (m_initialColumnSizeDone || devices.isEmpty())
+        return;
+
+    QSettings s;
+    const QByteArray headerState = s.value(QStringLiteral("ui/headerState")).toByteArray();
+    if (!headerState.isEmpty()) {
+        m_deviceTree->header()->restoreState(headerState);
+    } else {
+        // First ever launch: size to content, with a manual minimum for
+        // the Name column to account for the decoration icon.
+        m_deviceTree->resizeColumnToContents(0);
+        const QFontMetrics fm(m_deviceTree->font());
+        int maxNameWidth = fm.horizontalAdvance(
+            m_deviceTree->model()->headerData(0, Qt::Horizontal).toString());
+        for (const FritzDevice &dev : devices)
+            maxNameWidth = qMax(maxNameWidth, fm.horizontalAdvance(dev.name));
+        // Add padding for icon (24 px) + cell margins (16 px) + indent
+        maxNameWidth += 60;
+        if (m_deviceTree->columnWidth(0) < maxNameWidth)
+            m_deviceTree->setColumnWidth(0, maxNameWidth);
+    }
+    m_initialColumnSizeDone = true;
+}
+
+void MainWindow::reselectDevice(const QString &ain)
+{
+    // Iterate tree model: groups at top level, devices as children
+    const int groupCount = m_model->rowCount();
+    for (int g = 0; g < groupCount; ++g) {
+        const QModelIndex groupIdx = m_model->index(g, 0);
+        const int devCount = m_model->rowCount(groupIdx);
+        for (int d = 0; d < devCount; ++d) {
+            const QModelIndex leafIdx = m_model->index(d, 0, groupIdx);
+            const FritzDevice dev = m_model->deviceAt(leafIdx);
+            if (dev.ain != ain)
+                continue;
+
+            m_selectedAin = ain;
+            m_deviceTree->selectionModel()->blockSignals(true);
+            m_deviceTree->selectionModel()->setCurrentIndex(
+                leafIdx,
+                QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+            m_deviceTree->selectionModel()->blockSignals(false);
+
+            m_deviceIconLabel->setPixmap(deviceHeadingPixmap(dev));
+            m_deviceIconLabel->show();
+            m_deviceNameLabel->setText(dev.name);
+            m_deviceNameLabel->show();
+
+            // Suppress the panel update if a switch command was recently
+            // issued for this device/group and the Fritz!Box may still be
+            // reporting transient (inconsistent) member states.
+            const bool suppressed = m_suppressPanelUntil.isValid()
+                                 && m_suppressForAin == dev.ain
+                                 && QDateTime::currentDateTime() < m_suppressPanelUntil;
+            if (!suppressed)
+                updateDevicePanel(dev);
+
+            // Poll tick for the same device: update series in-place without
+            // rebuilding charts (avoids flicker and unnecessary work).
+            const FritzDeviceList memberDevs = dev.isGroup()
+                ? collectMemberDevices(dev) : FritzDeviceList();
+            m_chartWidget->updateRollingCharts(dev, memberDevs);
+
+            fetchEnergyStatsIfDue(dev, memberDevs);
+            return;
+        }
+    }
+}
+
+void MainWindow::fetchEnergyStatsIfDue(const FritzDevice &dev,
+                                        const FritzDeviceList &memberDevs)
+{
+    if (!dev.hasEnergyMeter())
+        return;
+
+    // Throttle interval depends on the currently displayed view:
+    // 60 s for the 15-min/24-h chart, 5 min for daily/monthly,
+    // 30 s when no chart has been built yet (grid==0, placeholder state).
+    const int grid = m_chartWidget->activeEnergyGrid();
+    const int throttleSecs = (grid == 0)   ? 30
+                           : (grid == 900) ? 60
+                                           : 300;
+    if (m_lastStatsFetch.isValid() &&
+        m_lastStatsFetch.secsTo(QDateTime::currentDateTime()) < throttleSecs)
+        return;
+
+    fetchGroupOrDeviceStats(dev, memberDevs);
+    m_lastStatsFetch = QDateTime::currentDateTime();
+}
+
+void MainWindow::fetchGroupOrDeviceStats(const FritzDevice &dev,
+                                          const FritzDeviceList &memberDevs)
+{
+    // Reset group-fetch state unconditionally before starting new fetches.
+    m_groupMemberStats.clear();
+    m_groupMemberOrder.clear();
+    m_groupStatsPending = 0;
+    m_groupAin.clear();
+
+    if (dev.isGroup()) {
+        FritzDeviceList energyMembers;
+        for (const FritzDevice &m : memberDevs)
+            if (m.hasEnergyMeter())
+                energyMembers.append(m);
+        if (!energyMembers.isEmpty()) {
+            m_groupAin = dev.ain;
+            for (const FritzDevice &m : energyMembers) {
+                m_groupMemberStats.insert(m.ain, DeviceBasicStats{});
+                m_groupMemberOrder.append(m.ain);
+            }
+            m_groupStatsPending = energyMembers.size();
+            for (const FritzDevice &m : energyMembers)
+                m_api->fetchDeviceStats(m.ain);
+        }
+    } else {
+        m_api->fetchDeviceStats(dev.ain);
+    }
+}
+
+// ── Device list updated ──────────────────────────────────────────────────────
+
 void MainWindow::onDeviceListUpdated(const FritzDeviceList &devices)
 {
     // Save the selected AIN before the model reset: beginResetModel/endResetModel
@@ -584,136 +733,19 @@ void MainWindow::onDeviceListUpdated(const FritzDeviceList &devices)
     // capture it here, before that chain runs.
     const QString previousAin = m_selectedAin;
 
-    // Save which groups are currently expanded (keyed by raw label via UserRole)
-    // so we can restore the same state after the model reset.
-    QSet<QString> expandedGroups;
-    const int oldGroupCount = m_model->rowCount();
-    for (int g = 0; g < oldGroupCount; ++g) {
-        const QModelIndex gi = m_model->index(g, 0);
-        if (m_deviceTree->isExpanded(gi))
-            expandedGroups.insert(m_model->data(gi, Qt::UserRole).toString());
-    }
-    // If nothing was recorded yet (first load), default to expanding everything.
-    const bool firstLoad = expandedGroups.isEmpty() && oldGroupCount == 0;
+    const QSet<QString> expandedGroups = saveTreeState();
+    const bool firstLoad = expandedGroups.isEmpty() && m_model->rowCount() == 0;
 
     m_model->updateDevices(devices);
 
-    // On the first data load, restore saved column widths or — if none saved
-    // yet — auto-size to content so names are fully visible.
-    if (!m_initialColumnSizeDone && !devices.isEmpty()) {
-        QSettings s;
-        const QByteArray headerState = s.value(QStringLiteral("ui/headerState")).toByteArray();
-        if (!headerState.isEmpty()) {
-            m_deviceTree->header()->restoreState(headerState);
-        } else {
-            // First ever launch: size to content, with a manual minimum for
-            // the Name column to account for the decoration icon.
-            m_deviceTree->resizeColumnToContents(0);
-            const QFontMetrics fm(m_deviceTree->font());
-            int maxNameWidth = fm.horizontalAdvance(
-                m_deviceTree->model()->headerData(0, Qt::Horizontal).toString());
-            for (const FritzDevice &dev : devices)
-                maxNameWidth = qMax(maxNameWidth, fm.horizontalAdvance(dev.name));
-            // Add padding for icon (24 px) + cell margins (16 px) + indent
-            maxNameWidth += 60;
-            if (m_deviceTree->columnWidth(0) < maxNameWidth)
-                m_deviceTree->setColumnWidth(0, maxNameWidth);
-        }
-        m_initialColumnSizeDone = true;
-    }
-
-    // Restore group expansion state.  On first load expand everything;
-    // on subsequent updates re-apply whatever was open/closed before.
-    {
-        const int newGroupCount = m_model->rowCount();
-        for (int g = 0; g < newGroupCount; ++g) {
-            const QModelIndex gi = m_model->index(g, 0);
-            const QString label  = m_model->data(gi, Qt::UserRole).toString();
-            // firstLoad: expand all; otherwise expand only if it was expanded before.
-            m_deviceTree->setExpanded(gi, firstLoad || expandedGroups.contains(label));
-        }
-    }
+    initColumnSizes(devices);
+    restoreTreeState(expandedGroups, firstLoad);
 
     // Keep the current selection / panel in sync.
     // Use previousAin because m_selectedAin was cleared by the model reset
     // triggering currentChanged → onDeviceSelected(invalid).
     if (!previousAin.isEmpty()) {
-        // Iterate tree model: groups at top level, devices as children
-        const int groupCount = m_model->rowCount();
-        bool found = false;
-        for (int g = 0; g < groupCount && !found; ++g) {
-            const QModelIndex groupIdx = m_model->index(g, 0);
-            const int devCount = m_model->rowCount(groupIdx);
-            for (int d = 0; d < devCount && !found; ++d) {
-                const QModelIndex leafIdx = m_model->index(d, 0, groupIdx);
-                const FritzDevice dev = m_model->deviceAt(leafIdx);
-                if (dev.ain == previousAin) {
-                    found = true;
-                    m_selectedAin = previousAin;
-                    m_deviceTree->selectionModel()->blockSignals(true);
-                    m_deviceTree->selectionModel()->setCurrentIndex(
-                        leafIdx,
-                        QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
-                    m_deviceTree->selectionModel()->blockSignals(false);
-
-                    m_deviceIconLabel->setPixmap(deviceHeadingPixmap(dev));
-                    m_deviceIconLabel->show();
-                    m_deviceNameLabel->setText(dev.name);
-                    m_deviceNameLabel->show();
-                    // Suppress the panel update if a switch command was recently
-                    // issued for this device/group and the Fritz!Box may still be
-                    // reporting transient (inconsistent) member states.
-                    const bool suppressed = m_suppressPanelUntil.isValid()
-                                         && m_suppressForAin == dev.ain
-                                         && QDateTime::currentDateTime() < m_suppressPanelUntil;
-                    if (!suppressed)
-                        updateDevicePanel(dev);
-                    // Poll tick for the same device: update series in-place without
-                    // rebuilding charts (avoids flicker and unnecessary work).
-                    const FritzDeviceList memberDevs = dev.isGroup()
-                        ? collectMemberDevices(dev) : FritzDeviceList();
-                    m_chartWidget->updateRollingCharts(dev, memberDevs);
-                    // Refresh energy history stats; throttle interval depends on the
-                    // currently displayed view: 60 s for the 15-min/24-h chart
-                    // (so the most-recent bar stays fresh), 5 min for daily/monthly,
-                    // 30 s when no chart has been built yet (grid==0, placeholder state)
-                    // so data appears quickly after the first fetch.
-                    if (dev.hasEnergyMeter()) {
-                        const int grid = m_chartWidget->activeEnergyGrid();
-                        const int throttleSecs = (grid == 0)   ? 30
-                                               : (grid == 900) ? 60
-                                                                : 300;
-                        if (!m_lastStatsFetch.isValid() ||
-                            m_lastStatsFetch.secsTo(QDateTime::currentDateTime()) >= throttleSecs) {
-                            if (dev.isGroup()) {
-                                FritzDeviceList energyMembers;
-                                for (const FritzDevice &m : memberDevs)
-                                    if (m.hasEnergyMeter())
-                                        energyMembers.append(m);
-                                // Reset group-fetch state before starting new fetches.
-                                m_groupMemberStats.clear();
-                                m_groupMemberOrder.clear();
-                                m_groupStatsPending = 0;
-                                m_groupAin.clear();
-                                if (!energyMembers.isEmpty()) {
-                                    m_groupAin = dev.ain;
-                                    for (const FritzDevice &m : energyMembers) {
-                                        m_groupMemberStats.insert(m.ain, DeviceBasicStats{});
-                                        m_groupMemberOrder.append(m.ain);
-                                    }
-                                    m_groupStatsPending = energyMembers.size();
-                                    for (const FritzDevice &m : energyMembers)
-                                        m_api->fetchDeviceStats(m.ain);
-                                }
-                            } else {
-                                m_api->fetchDeviceStats(dev.ain);
-                            }
-                            m_lastStatsFetch = QDateTime::currentDateTime();
-                        }
-                    }
-                }
-            }
-        }
+        reselectDevice(previousAin);
     }
 
     const int n = devices.size();
@@ -828,38 +860,7 @@ void MainWindow::onDeviceSelected(const QModelIndex &current, const QModelIndex 
     m_chartWidget->updateDevice(dev, memberDevs);
     // Fetch detailed energy history immediately on selection
     if (dev.hasEnergyMeter()) {
-        if (dev.isGroup()) {
-            // For groups, fetch stats for each energy-capable member rather than
-            // the group AIN itself (Fritz!Box does not return history for group AIns).
-            FritzDeviceList energyMembers;
-            for (const FritzDevice &m : memberDevs)
-                if (m.hasEnergyMeter())
-                    energyMembers.append(m);
-            // Reset group-fetch state unconditionally before starting new fetches.
-            // This also cancels any in-flight replies from a previous group selection
-            // (the lambda guards against them via m_groupAin == m_selectedAin).
-            m_groupMemberStats.clear();
-            m_groupMemberOrder.clear();
-            m_groupStatsPending = 0;
-            m_groupAin.clear();
-            if (!energyMembers.isEmpty()) {
-                m_groupAin = dev.ain;
-                for (const FritzDevice &m : energyMembers) {
-                    m_groupMemberStats.insert(m.ain, DeviceBasicStats{});
-                    m_groupMemberOrder.append(m.ain);
-                }
-                m_groupStatsPending = energyMembers.size();
-                for (const FritzDevice &m : energyMembers)
-                    m_api->fetchDeviceStats(m.ain);
-            }
-        } else {
-            // Non-group device: cancel any pending group fetch and fetch directly.
-            m_groupMemberStats.clear();
-            m_groupMemberOrder.clear();
-            m_groupStatsPending = 0;
-            m_groupAin.clear();
-            m_api->fetchDeviceStats(dev.ain);
-        }
+        fetchGroupOrDeviceStats(dev, memberDevs);
         m_lastStatsFetch = QDateTime::currentDateTime();
     }
 }
@@ -905,75 +906,82 @@ void MainWindow::updateDevicePanel(const FritzDevice &device)
     // and provide the member list to the widget for per-member dropdown menus.
     if (device.isGroup() && panelIdx == PanelSwitch) {
         FritzDevice dev = device;
-        const FritzDeviceList members = collectMemberDevices(device);
-        int  switchMembers        = 0;
-        int  lockedMembers        = 0; // members where locked || deviceLocked (matches rebuildMenus predicate)
-        int  controllableOn       = 0; // controllable members currently on
-        int  controllableTotal    = 0; // controllable (non-locked) switch members
-        bool anyOn                = false;
-        bool anyOff               = false;
-        for (const FritzDevice &m : members) {
-            if (!m.hasSwitch()) continue;
-            if (!m.present) continue;   // offline members are invisible to group state
-            ++switchMembers;
-            // Only the API lock (locked) prevents remote control.  The
-            // physical-button lock (deviceLocked) disables the on-device
-            // button but does NOT block the AHA / REST API.
-            const bool memberLocked = m.switchStats.locked;
-            if (memberLocked) {
-                ++lockedMembers;
-                // Locked members cannot be remote-controlled, but their
-                // actual power state still matters for the group display
-                // label (ON / OFF / PARTIAL).  Without this, a group where
-                // every member is locked would always show "OFF".
-                if (m.switchStats.on)
-                    anyOn = true;
-                else
-                    anyOff = true;
-            } else {
-                ++controllableTotal;
-                if (m.switchStats.on) {
-                    anyOn = true;
-                    ++controllableOn;
-                } else {
-                    anyOff = true;
-                }
-            }
-        }
-        // Group-level buttons are disabled only when every switch-capable member is
-        // locked.  If at least one member is controllable the group-level action
-        // remains available; locked members are greyed-out in the per-member menus.
-        const bool allLocked = (switchMembers > 0) && (lockedMembers == switchMembers);
-        dev.switchStats.locked           = allLocked;
-        dev.switchStats.deviceLocked     = false; // rolled into locked above
-        // on: synthesized from ALL online members (including locked ones) rather
-        //   than taken from the raw group "active" field, which the Fritz!Box
-        //   sets to true if ANY member is on — meaning it can disagree with what
-        //   the member devices actually report.  Locked members contribute their
-        //   real power state so that a fully-locked group still shows ON/OFF
-        //   correctly instead of always displaying "OFF".
-        // mixedSwitchState: true when members have differing on/off states
-        //   right now → label shows PARTIAL.
-        // hasLockedMembers: true when at least one member is locked and at least
-        //   one is controllable → a group-level toggle would leave the group in a
-        //   permanently mixed state, so the toggle button must stay in InstantPopup
-        //   (dropdown-only) mode even when all controllable members are currently
-        //   in the same state.
-        // allOn/allOff: all controllable members are already in the target state →
-        //   disable the corresponding group-level button (and grey out members in
-        //   the dropdown that are already in the target state).
-        dev.switchStats.on               = anyOn;
-        dev.switchStats.mixedSwitchState = anyOn && anyOff;
-        dev.switchStats.hasLockedMembers = (lockedMembers > 0) && (lockedMembers < switchMembers);
-        dev.switchStats.allOn            = (controllableTotal > 0) && (controllableOn == controllableTotal);
-        dev.switchStats.allOff           = (controllableTotal > 0) && (controllableOn == 0);
-        dw->updateDevice(dev);
-        dw->setMembers(members);
+        synthesizeGroupSwitchState(dev, dw);
         return;
     }
 
     dw->updateDevice(device);
     dw->setMembers(FritzDeviceList()); // clear any stale member menus
+}
+
+// ── Group switch state synthesis ─────────────────────────────────────────────
+
+void MainWindow::synthesizeGroupSwitchState(FritzDevice &dev, DeviceWidget *dw) const
+{
+    const FritzDeviceList members = collectMemberDevices(dev);
+    int  switchMembers        = 0;
+    int  lockedMembers        = 0; // members where locked (matches rebuildMenus predicate)
+    int  controllableOn       = 0; // controllable members currently on
+    int  controllableTotal    = 0; // controllable (non-locked) switch members
+    bool anyOn                = false;
+    bool anyOff               = false;
+    for (const FritzDevice &m : members) {
+        if (!m.hasSwitch()) continue;
+        if (!m.present) continue;   // offline members are invisible to group state
+        ++switchMembers;
+        // Only the API lock (locked) prevents remote control.  The
+        // physical-button lock (deviceLocked) disables the on-device
+        // button but does NOT block the AHA / REST API.
+        const bool memberLocked = m.switchStats.locked;
+        if (memberLocked) {
+            ++lockedMembers;
+            // Locked members cannot be remote-controlled, but their
+            // actual power state still matters for the group display
+            // label (ON / OFF / PARTIAL).  Without this, a group where
+            // every member is locked would always show "OFF".
+            if (m.switchStats.on)
+                anyOn = true;
+            else
+                anyOff = true;
+        } else {
+            ++controllableTotal;
+            if (m.switchStats.on) {
+                anyOn = true;
+                ++controllableOn;
+            } else {
+                anyOff = true;
+            }
+        }
+    }
+    // Group-level buttons are disabled only when every switch-capable member is
+    // locked.  If at least one member is controllable the group-level action
+    // remains available; locked members are greyed-out in the per-member menus.
+    const bool allLocked = (switchMembers > 0) && (lockedMembers == switchMembers);
+    dev.switchStats.locked           = allLocked;
+    dev.switchStats.deviceLocked     = false; // rolled into locked above
+    // on: synthesized from ALL online members (including locked ones) rather
+    //   than taken from the raw group "active" field, which the Fritz!Box
+    //   sets to true if ANY member is on — meaning it can disagree with what
+    //   the member devices actually report.  Locked members contribute their
+    //   real power state so that a fully-locked group still shows ON/OFF
+    //   correctly instead of always displaying "OFF".
+    // mixedSwitchState: true when members have differing on/off states
+    //   right now → label shows PARTIAL.
+    // hasLockedMembers: true when at least one member is locked and at least
+    //   one is controllable → a group-level toggle would leave the group in a
+    //   permanently mixed state, so the toggle button must stay in InstantPopup
+    //   (dropdown-only) mode even when all controllable members are currently
+    //   in the same state.
+    // allOn/allOff: all controllable members are already in the target state →
+    //   disable the corresponding group-level button (and grey out members in
+    //   the dropdown that are already in the target state).
+    dev.switchStats.on               = anyOn;
+    dev.switchStats.mixedSwitchState = anyOn && anyOff;
+    dev.switchStats.hasLockedMembers = (lockedMembers > 0) && (lockedMembers < switchMembers);
+    dev.switchStats.allOn            = (controllableTotal > 0) && (controllableOn == controllableTotal);
+    dev.switchStats.allOff           = (controllableTotal > 0) && (controllableOn == 0);
+    dw->updateDevice(dev);
+    dw->setMembers(members);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

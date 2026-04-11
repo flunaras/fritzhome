@@ -16,6 +16,7 @@
 
 class FritzApi;
 class DeviceModel;
+class DeviceWidget;
 class ChartWidget;
 class QTreeView;
 class QStackedWidget;
@@ -77,12 +78,32 @@ private slots:
 private:
     void setupActions();
     void setupStatusBar();
+    void setupDeviceTree(QSplitter *splitter);
+    void setupControlPanel(QSplitter *splitter);
+    void wireSignals();
+    void restoreSettings();
     void updateDevicePanel(const FritzDevice &device);
     void setStatusMessage(const QString &msg);
     /// Collect all member FritzDevice objects for a group device.
     FritzDeviceList collectMemberDevices(const FritzDevice &groupDev) const;
     void closeEvent(QCloseEvent *event) override;
     void showEvent(QShowEvent *event) override;
+
+    // ── onDeviceListUpdated helpers ───────────────────────────────────────
+    /// Save expanded-group labels from the device tree (before model reset).
+    QSet<QString> saveTreeState() const;
+    /// Re-expand groups whose labels are in @p expandedGroups (or all if @p expandAll).
+    void restoreTreeState(const QSet<QString> &expandedGroups, bool expandAll = false);
+    /// First-load column width setup (uses saved header state or auto-size).
+    void initColumnSizes(const FritzDeviceList &devices);
+    /// Re-select a device by AIN after model reset, restoring panel and charts.
+    void reselectDevice(const QString &ain);
+    /// Throttled energy stats fetch — skips if too recent for current chart grid.
+    void fetchEnergyStatsIfDue(const FritzDevice &dev, const FritzDeviceList &memberDevs);
+    /// Fetch stats for a group's energy-capable members or a single device.
+    void fetchGroupOrDeviceStats(const FritzDevice &dev, const FritzDeviceList &memberDevs);
+    /// Synthesize group-level switch state (lock, mixed, partial) from members.
+    void synthesizeGroupSwitchState(FritzDevice &dev, DeviceWidget *dw) const;
 
     // Core objects
     FritzApi    *m_api    = nullptr;

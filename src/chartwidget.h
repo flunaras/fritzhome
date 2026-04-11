@@ -24,6 +24,7 @@ QT_FORWARD_DECLARE_CLASS(QGraphicsTextItem)
 
 // Qt5: charts live in QtCharts namespace; Qt6: global namespace (no wrapper needed)
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+#  define QTCHARTS_NS
 class QDateTimeAxis;
 class QValueAxis;
 class QChartView;
@@ -31,6 +32,7 @@ class QLineSeries;
 class QPieSeries;
 class QXYSeries;
 #else
+#  define QTCHARTS_NS QtCharts::
 namespace QtCharts {
 class QDateTimeAxis;
 class QValueAxis;
@@ -112,6 +114,17 @@ protected:
 
 private:
     // -- builders (called once per updateDevice) ------------------------------
+    /// Reset axis/series/label pointers and unlock scales on device switch.
+    void resetChartState(bool deviceChanged);
+    /// Reparent persistent controls and delete all tab widgets safely.
+    void teardownTabs();
+    /// Create chart tabs (Temperature, Power, Energy, Humidity) for the device.
+    void buildChartsForDevice(const FritzDevice &device,
+                              const FritzDeviceList &memberDevices,
+                              bool deviceChanged);
+    /// Restore previously active tab, apply scroll/time-window, persist state.
+    void restoreTabAndApplyWindow(const QString &activeTabText);
+
     void buildTemperatureChart(const FritzDevice &dev);
     void buildGroupTemperatureChart(const FritzDeviceList &memberDevices);
     void buildPowerChart(const FritzDevice &dev,
@@ -122,6 +135,15 @@ private:
     void buildEnergyHistoryChart(const DeviceBasicStats &stats);
     void buildEnergyHistoryChartStacked(const QList<QPair<QString, DeviceBasicStats>> &memberStats);
     void buildEnergyHistoryPlaceholder(const QStringList &viewLabels, int selectedIdx);
+
+    // -- energy history shared helpers ----------------------------------------
+    /// Build the stacked-layout container (chart + combo overlay + total overlay),
+    /// install event filters, set member state, and insert the Energy History tab.
+    void finalizeEnergyHistoryTab(QTCHARTS_NS QChartView *chartView,
+                                  const QStringList &viewLabels,
+                                  int selectedIdx,
+                                  const QString &totalText,
+                                  int grid);
 
     // -- time-window helpers (for rolling-poll charts) -----------------------
     /// Returns the selected window duration in milliseconds.
@@ -172,13 +194,6 @@ private:
     // -- cached chart state (rebuilt each updateDevice call) ------------------
     FritzDevice     m_device;          ///< last device passed to updateDevice()
     FritzDeviceList m_memberDevices;   ///< for groups: member devices (empty for non-groups)
-
-// In Qt6, chart types are in the global namespace; in Qt5 they are in QtCharts::
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-#  define QTCHARTS_NS
-#else
-#  define QTCHARTS_NS QtCharts::
-#endif
 
     // Temperature chart
     QTCHARTS_NS QDateTimeAxis *m_tempAxisX  = nullptr;
