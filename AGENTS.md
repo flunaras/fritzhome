@@ -90,6 +90,7 @@ UI layer:
 - `src/chartwidget.h / .cpp` — **Qt Charts time-series + energy history** (complex state management)
 
 Device control panels (one per device type, all inherit DeviceWidget):
+- `src/devicewidget.h / .cpp` — **abstract base class** for all device control panels (defines `updateDevice()` virtual interface)
 - `src/switchwidget.h / .cpp` — smart plug control
 - `src/thermostatwidget.h / .cpp` — radiator controller (HKR)
 - `src/energywidget.h / .cpp` — energy meter (read-only)
@@ -145,7 +146,7 @@ Translations:
 - `GET /login_sid.lua?version=2` — fetch challenge (pbkdf2 or md5)
 - `GET /login_sid.lua?version=2&username=<u>&response=<r>` — submit response, get SID
 - `GET /api/v0/smarthome/overview` — device list (entire JSON tree)
-- `GET /api/v0/smarthome/overview/units/{unitUID}` — single device stats + energy history (with `?statistics_interval=<grid>`)
+- `GET /api/v0/smarthome/overview/units/{unitUID}` — single device stats + energy history (all statistics grids returned in response)
 - `PUT /api/v0/smarthome/overview/units/{unitUID}` — send command (JSON body: `{"interfaces": {…}}`)
 
 Response caching:
@@ -550,8 +551,8 @@ The release process ensures all five supported distro profiles build successfull
 3. **Verify binaries and packages exist** in `out/`:
    - `out/opensuse/tumbleweed/x86_64/fritzhome` (binary, amd64)
    - `out/opensuse/tumbleweed/aarch64/fritzhome` (binary, aarch64)
-   - `out/opensuse/leap-15.6/x86_64/fritzhome` (binary, Qt5)
-   - `out/opensuse/leap-16.0/x86_64/fritzhome` (binary, Qt6+KF6)
+   - `out/opensuse/leap15.6/x86_64/fritzhome` (binary, Qt5)
+   - `out/opensuse/leap16.0/x86_64/fritzhome` (binary, Qt6+KF6)
    - `out/ubuntu/24.04/amd64/fritzhome` (binary, Ubuntu Qt6)
    - All corresponding `.rpm` and `.deb` packages
 
