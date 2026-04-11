@@ -38,8 +38,12 @@ void TemperatureChartBuilder::buildTemperatureChart(const FritzDevice &dev)
     QLineSeries *series = new QLineSeries();
     series->setName(i18n("Temperature"));
 
-    for (const auto &point : dev.temperatureHistory) {
-        series->append(point.first.toMSecsSinceEpoch(), point.second);
+    {
+        QList<QPointF> points;
+        points.reserve(dev.temperatureHistory.size());
+        for (const auto &point : dev.temperatureHistory)
+            points.append(QPointF(point.first.toMSecsSinceEpoch(), point.second));
+        series->replace(downsampleMinMax(points));
     }
 
     // If no history yet but we have a current value, show a single point
@@ -163,18 +167,23 @@ void TemperatureChartBuilder::buildGroupTemperatureChart(const FritzDeviceList &
         pen.setWidth(2);
         series->setPen(pen);
 
-        for (const auto &pt : mem.temperatureHistory) {
-            series->append(pt.first.toMSecsSinceEpoch(), pt.second);
-            minAll = qMin(minAll, pt.second);
-            maxAll = qMax(maxAll, pt.second);
-            anyData = true;
-        }
-        // Fallback single point if history is empty but current value is known
-        if (mem.temperatureHistory.isEmpty() && mem.temperature > -273.0) {
-            series->append(QDateTime::currentDateTime().toMSecsSinceEpoch(), mem.temperature);
-            minAll = qMin(minAll, mem.temperature);
-            maxAll = qMax(maxAll, mem.temperature);
-            anyData = true;
+        {
+            QList<QPointF> points;
+            points.reserve(mem.temperatureHistory.size() + 1);
+            for (const auto &pt : mem.temperatureHistory) {
+                points.append(QPointF(pt.first.toMSecsSinceEpoch(), pt.second));
+                minAll = qMin(minAll, pt.second);
+                maxAll = qMax(maxAll, pt.second);
+                anyData = true;
+            }
+            // Fallback single point if history is empty but current value is known
+            if (mem.temperatureHistory.isEmpty() && mem.temperature > -273.0) {
+                points.append(QPointF(QDateTime::currentDateTime().toMSecsSinceEpoch(), mem.temperature));
+                minAll = qMin(minAll, mem.temperature);
+                maxAll = qMax(maxAll, mem.temperature);
+                anyData = true;
+            }
+            series->replace(downsampleMinMax(points));
         }
 
         chart->addSeries(series);
@@ -235,7 +244,7 @@ void TemperatureChartBuilder::updateRolling(const FritzDevice &device,
             points.append(QPointF(p.first.toMSecsSinceEpoch(), p.second));
         if (history.isEmpty() && hasFallback)
             points.append(QPointF(fallbackTs, fallbackValue));
-        series->replace(points);
+        series->replace(downsampleMinMax(points));
     };
 
     // --- Temperature (single-device) ---

@@ -19,7 +19,6 @@
 
 #include <QtCharts/QChart>
 #include <QtCharts/QLineSeries>
-#include <QtCharts/QSplineSeries>
 #include <QtCharts/QAreaSeries>
 #include <QtCharts/QDateTimeAxis>
 #include <QtCharts/QValueAxis>
@@ -89,15 +88,20 @@ void PowerChartBuilder::buildPowerChart(const FritzDevice &dev,
             QLineSeries *upper = new QLineSeries();
             QLineSeries *lower = new QLineSeries();
 
+            QList<QPointF> upperPts, lowerPts;
+            upperPts.reserve(timestamps.size());
+            lowerPts.reserve(timestamps.size());
             for (qint64 ts : timestamps) {
                 const QVector<double> &vals = tsMap[ts];
                 double lowerVal = 0.0;
                 for (int j = 0; j < i; ++j) lowerVal += vals[j];
                 double upperVal = lowerVal + vals[i];
-                upper->append(ts, upperVal);
-                lower->append(ts, lowerVal);
+                upperPts.append(QPointF(ts, upperVal));
+                lowerPts.append(QPointF(ts, lowerVal));
                 if (upperVal > yMax) yMax = upperVal;
             }
+            upper->replace(downsampleMinMax(upperPts));
+            lower->replace(downsampleMinMax(lowerPts));
 
             QAreaSeries *area = new QAreaSeries(upper, lower);
             QColor fill = c;
@@ -144,11 +148,15 @@ void PowerChartBuilder::buildPowerChart(const FritzDevice &dev,
 
     } else {
         // Single-device (or group with <2 energy members): original area chart
-        QSplineSeries *series = new QSplineSeries();
+        QLineSeries *series = new QLineSeries();
         series->setName(i18n("Power (W)"));
 
-        for (const auto &point : dev.powerHistory) {
-            series->append(point.first.toMSecsSinceEpoch(), point.second);
+        {
+            QList<QPointF> points;
+            points.reserve(dev.powerHistory.size());
+            for (const auto &point : dev.powerHistory)
+                points.append(QPointF(point.first.toMSecsSinceEpoch(), point.second));
+            series->replace(downsampleMinMax(points));
         }
 
         if (dev.powerHistory.isEmpty() && dev.energyStats.valid) {
@@ -213,8 +221,12 @@ void PowerChartBuilder::buildHumidityChart(const FritzDevice &dev)
     pen.setWidth(2);
     series->setPen(pen);
 
-    for (const auto &point : dev.humidityHistory) {
-        series->append(point.first.toMSecsSinceEpoch(), point.second);
+    {
+        QList<QPointF> points;
+        points.reserve(dev.humidityHistory.size());
+        for (const auto &point : dev.humidityHistory)
+            points.append(QPointF(point.first.toMSecsSinceEpoch(), point.second));
+        series->replace(downsampleMinMax(points));
     }
 
     if (dev.humidityHistory.isEmpty() && dev.humidityStats.valid) {
@@ -252,6 +264,9 @@ void PowerChartBuilder::updateRolling(const FritzDevice &device,
     // replace(QList<QPointF>) emits a single pointsReplaced signal instead of
     // N individual pointAdded signals, which is dramatically faster when the
     // history list grows large (up to ~17,000 points over 24 hours).
+    // The result is downsampled via min/max-per-bucket envelope decimation so
+    // that Qt Charts never renders more than kMaxSeriesPoints, keeping the
+    // rendering cost bounded regardless of time window size.
     auto reloadSeries = [](QXYSeries *series,
                            const QList<QPair<QDateTime, double>> &history,
                            double fallbackValue,
@@ -266,7 +281,7 @@ void PowerChartBuilder::updateRolling(const FritzDevice &device,
             points.append(QPointF(p.first.toMSecsSinceEpoch(), p.second));
         if (history.isEmpty() && hasFallback)
             points.append(QPointF(fallbackTs, fallbackValue));
-        series->replace(points);
+        series->replace(downsampleMinMax(points));
     };
 
     // --- Power (single-device or group fallback) ---
@@ -349,8 +364,8 @@ void PowerChartBuilder::updateRolling(const FritzDevice &device,
                     upperPts.append(QPointF(ts, upperVal));
                     lowerPts.append(QPointF(ts, lowerVal));
                 }
-                upper->replace(upperPts);
-                lower->replace(lowerPts);
+                upper->replace(downsampleMinMax(upperPts));
+                lower->replace(downsampleMinMax(lowerPts));
             }
 
             // Update power label to show group total

@@ -130,3 +130,27 @@ bool scanSeriesRange(
     const QList<QXYSeries *> &seriesList,
     qint64 minMs, qint64 maxMs,
     double &outMin, double &outMax);
+
+// ── Series downsampling ─────────────────────────────────────────────────────
+
+/// Maximum number of data points kept in any chart series.  Beyond this
+/// threshold the series is downsampled using a min/max-per-bucket algorithm
+/// that preserves visual peaks and troughs while dramatically reducing the
+/// number of points Qt Charts must render.
+///
+/// 2 000 points is well above the pixel resolution of any reasonable display
+/// (charts are typically 800–2 000 pixels wide) so visual fidelity is
+/// unaffected, yet it caps the rendering cost at a constant bound even when
+/// the history list grows to 17 000+ entries after 24 hours of 5-second
+/// polling.
+constexpr int kMaxSeriesPoints = 2000;
+
+/// Downsample a list of QPointF using min/max-per-bucket envelope decimation.
+/// Divides the X range into kMaxSeriesPoints/2 equal buckets; for each bucket
+/// emits the point with the minimum Y and the point with the maximum Y (in
+/// time order).  This preserves visual extremes (spikes, dips) while keeping
+/// the output at or below kMaxSeriesPoints entries.
+///
+/// If \a points already contains kMaxSeriesPoints or fewer entries, it is
+/// returned unmodified (zero-copy via implicit sharing).
+QList<QPointF> downsampleMinMax(const QList<QPointF> &points);

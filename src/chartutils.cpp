@@ -422,3 +422,73 @@ bool scanSeriesRange(
     }
     return found;
 }
+
+// ── Series downsampling ─────────────────────────────────────────────────────
+
+QList<QPointF> downsampleMinMax(const QList<QPointF> &points)
+{
+    const int n = points.size();
+    if (n <= kMaxSeriesPoints)
+        return points;                 // implicit-sharing: no deep copy
+
+    // Divide the X range into kMaxSeriesPoints/2 equal-width buckets.
+    // For each bucket we emit the min-Y and max-Y points (in time order)
+    // so that visual extremes (spikes, dips) are preserved.
+    const int nBuckets  = kMaxSeriesPoints / 2;
+    const double xFirst = points.first().x();
+    const double xLast  = points.last().x();
+    const double xSpan  = xLast - xFirst;
+
+    if (xSpan <= 0.0)
+        return points;                 // degenerate: all same timestamp
+
+    const double bucketW = xSpan / nBuckets;
+
+    QList<QPointF> out;
+    out.reserve(kMaxSeriesPoints + 2);  // +2 for first/last guarantees
+
+    // Always keep the very first point for correct area-fill anchoring.
+    out.append(points.first());
+
+    int i = 0;
+    for (int b = 0; b < nBuckets; ++b) {
+        const double bStart = xFirst + b * bucketW;
+        const double bEnd   = bStart + bucketW;
+
+        // Find all points in this bucket
+        int bucketBegin = i;
+        while (i < n && points.at(i).x() < bEnd)
+            ++i;
+        int bucketEnd = i;             // exclusive
+
+        if (bucketBegin >= bucketEnd)
+            continue;                  // empty bucket
+
+        // Find min and max Y within the bucket
+        int minIdx = bucketBegin, maxIdx = bucketBegin;
+        double minY = points.at(bucketBegin).y();
+        double maxY = minY;
+        for (int j = bucketBegin + 1; j < bucketEnd; ++j) {
+            double y = points.at(j).y();
+            if (y < minY) { minY = y; minIdx = j; }
+            if (y > maxY) { maxY = y; maxIdx = j; }
+        }
+
+        // Emit min and max in time order (avoid duplicates if same point)
+        if (minIdx == maxIdx) {
+            out.append(points.at(minIdx));
+        } else if (minIdx < maxIdx) {
+            out.append(points.at(minIdx));
+            out.append(points.at(maxIdx));
+        } else {
+            out.append(points.at(maxIdx));
+            out.append(points.at(minIdx));
+        }
+    }
+
+    // Always keep the very last point for correct area-fill anchoring.
+    if (out.last() != points.last())
+        out.append(points.last());
+
+    return out;
+}
