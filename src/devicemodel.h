@@ -47,6 +47,9 @@ public:
     /// Find a device by internal numeric ID across all type buckets. Returns a default FritzDevice if not found.
     FritzDevice deviceById(const QString &id) const;
 
+    /// Update producer/consumer status for a device and signal model update.
+    void updateDeviceProducerStatus(const QString &ain, bool isProducer);
+
     /// True if index points to a group-header row (not a device).
     bool isGroupHeader(const QModelIndex &index) const;
 

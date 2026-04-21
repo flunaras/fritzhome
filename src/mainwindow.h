@@ -89,6 +89,12 @@ private:
     void closeEvent(QCloseEvent *event) override;
     void showEvent(QShowEvent *event) override;
 
+    /// Persist producer/consumer status for a device and rebuild charts.
+    /// Called from device widget producerStatusChanged signals.
+    void setDeviceProducerStatus(const QString &ain, bool isProducer);
+    /// Load all producer/consumer settings from QSettings into device model.
+    void loadProducerSettings();
+
     // ── onDeviceListUpdated helpers ───────────────────────────────────────
     /// Save expanded-group labels from the device tree (before model reset).
     QSet<QString> saveTreeState() const;

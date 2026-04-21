@@ -67,6 +67,7 @@ private:
     // Stacked power chart (group mode)
     QList<QXYSeries *> m_powerStackedUpper;
     QList<QXYSeries *> m_powerStackedLower;
+    QXYSeries         *m_powerNetSeries = nullptr;  ///< orange net/effective line (group mode only)
 
     // Lock checkbox
     QPointer<QCheckBox> m_powerLockCheckBox = nullptr;

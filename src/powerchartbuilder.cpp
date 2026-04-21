@@ -34,6 +34,31 @@ PowerChartBuilder::PowerChartBuilder(ChartWidget &owner)
 {
 }
 
+// ── Stacked chart helpers ────────────────────────────────────────────────────
+
+/// Compute the (lowerVal, upperVal) bounds for layer \p i in a stacked chart
+/// given the signed per-layer values at one timestamp.
+///
+/// Consumers (vals[i] >= 0) stack upward from 0 independently of producers.
+/// Producers (vals[i] < 0) stack downward from 0 independently of consumers.
+/// This prevents mixed consumer/producer groups from producing crossing bands.
+static std::pair<double,double> stackedBounds(const QVector<double> &vals, int i)
+{
+    double consumerBase = 0.0;
+    double producerBase = 0.0;
+    for (int j = 0; j < i; ++j) {
+        if (vals[j] >= 0.0)
+            consumerBase += vals[j];
+        else
+            producerBase += vals[j];
+    }
+    double v = vals[i];
+    if (v >= 0.0)
+        return { consumerBase, consumerBase + v };
+    else
+        return { producerBase + v, producerBase };
+}
+
 // ── Power chart ─────────────────────────────────────────────────────────────
 
 void PowerChartBuilder::buildPowerChart(const FritzDevice &dev,
@@ -69,72 +94,112 @@ void PowerChartBuilder::buildPowerChart(const FritzDevice &dev,
 
     if (stackedMode) {
 
-        // Build cumulative time series: gather all unique timestamps
-        const int n = energyMembers.size();
-        QMap<qint64, QVector<double>> tsMap;
-        for (int i = 0; i < n; ++i) {
-            for (const auto &pt : energyMembers.at(i).powerHistory) {
-                qint64 ts = pt.first.toMSecsSinceEpoch();
-                if (!tsMap.contains(ts))
-                    tsMap[ts] = QVector<double>(n, 0.0);
-                tsMap[ts][i] = pt.second;
-            }
-        }
-        QList<qint64> timestamps = tsMap.keys();
+         // Build cumulative time series: gather all unique timestamps
+         const int n = energyMembers.size();
 
-        double yMax = 0.0;
-        for (int i = 0; i < n; ++i) {
-            QColor c = kChartPalette[i % kChartPaletteSize];
-            QLineSeries *upper = new QLineSeries();
-            QLineSeries *lower = new QLineSeries();
+         // Determine whether members have mixed producer/consumer roles.
+         bool hasProducer = false, hasConsumer = false;
+         for (const auto &m : energyMembers) {
+             if (m.isProducer) hasProducer = true; else hasConsumer = true;
+         }
+         const bool hasMixedProducers = hasProducer && hasConsumer;
 
-            QList<QPointF> upperPts, lowerPts;
-            upperPts.reserve(timestamps.size());
-            lowerPts.reserve(timestamps.size());
-            for (qint64 ts : timestamps) {
-                const QVector<double> &vals = tsMap[ts];
-                double lowerVal = 0.0;
-                for (int j = 0; j < i; ++j) lowerVal += vals[j];
-                double upperVal = lowerVal + vals[i];
-                upperPts.append(QPointF(ts, upperVal));
-                lowerPts.append(QPointF(ts, lowerVal));
-                if (upperVal > yMax) yMax = upperVal;
-            }
-            upper->replace(downsampleMinMax(upperPts));
-            lower->replace(downsampleMinMax(lowerPts));
+         QMap<qint64, QVector<double>> tsMap;
+         for (int i = 0; i < n; ++i) {
+             for (const auto &pt : energyMembers.at(i).powerHistory) {
+                 qint64 ts = pt.first.toMSecsSinceEpoch();
+                 if (!tsMap.contains(ts))
+                     tsMap[ts] = QVector<double>(n, 0.0);
+                 // Negate power for producer devices
+                 double power = energyMembers.at(i).isProducer ? -pt.second : pt.second;
+                 tsMap[ts][i] = power;
+             }
+         }
+         QList<qint64> timestamps = tsMap.keys();
 
-            QAreaSeries *area = new QAreaSeries(upper, lower);
-            QColor fill = c;
-            fill.setAlpha(120);
-            area->setBrush(QBrush(fill));
-            QPen pen(c);
-            pen.setWidth(1);
-            area->setPen(pen);
-            area->setName(energyMembers.at(i).name);
-            chart->addSeries(area);
-            area->attachAxis(axisX);
-            area->attachAxis(axisY);
+         double yMin = 0.0, yMax = 0.0;
+         for (int i = 0; i < n; ++i) {
+             QColor c = kChartPalette[i % kChartPaletteSize];
+             QLineSeries *upper = new QLineSeries();
+             QLineSeries *lower = new QLineSeries();
 
-            // Store pointers for in-place rolling updates
-            m_powerStackedUpper.append(upper);
-            m_powerStackedLower.append(lower);
-        }
+             QList<QPointF> upperPts, lowerPts;
+             upperPts.reserve(timestamps.size());
+             lowerPts.reserve(timestamps.size());
+             for (qint64 ts : timestamps) {
+                 const QVector<double> &vals = tsMap[ts];
+                 auto [lowerVal, upperVal] = stackedBounds(vals, i);
+                 upperPts.append(QPointF(ts, upperVal));
+                 lowerPts.append(QPointF(ts, lowerVal));
+                 yMax = qMax(yMax, upperVal);
+                 yMin = qMin(yMin, lowerVal);
+             }
+             upper->replace(downsampleMinMax(upperPts));
+             lower->replace(downsampleMinMax(lowerPts));
 
-        // Store energy members for rolling update
-        m_owner.m_memberDevices = energyMembers;
+             QAreaSeries *area = new QAreaSeries(upper, lower);
+             QColor fill = c;
+             fill.setAlpha(120);
+             area->setBrush(QBrush(fill));
+             QPen pen(c);
+             pen.setWidth(1);
+             area->setPen(pen);
+             area->setName(energyMembers.at(i).name);
+             chart->addSeries(area);
+             area->attachAxis(axisX);
+             area->attachAxis(axisY);
 
-        if (yMax > 0) {
-            applyAxisRange(axisY, roundAxisRange(0.0, yMax));
-        } else {
-            axisY->setRange(0, 10.0);
-        }
+         // Store pointers for in-place rolling updates
+         m_powerStackedUpper.append(upper);
+         m_powerStackedLower.append(lower);
+     }
+
+     // Net/effective power line: only shown when members have mixed producer/consumer
+     // roles — otherwise all areas point the same direction and a net line adds nothing.
+     if (hasMixedProducers) {
+         QLineSeries *netLine = new QLineSeries();
+         netLine->setName(i18n("Net"));
+         QPen netPen(QColor(0, 0, 0));
+         netPen.setWidth(2);
+         netLine->setPen(netPen);
+
+         QList<QPointF> netPts;
+         netPts.reserve(timestamps.size());
+         for (qint64 ts : timestamps) {
+             const QVector<double> &vals = tsMap[ts];
+             double net = 0.0;
+             for (double v : vals) net += v;
+             netPts.append(QPointF(ts, net));
+         }
+         netLine->replace(downsampleMinMax(netPts));
+
+         chart->addSeries(netLine);
+         netLine->attachAxis(axisX);
+         netLine->attachAxis(axisY);
+         m_powerNetSeries = netLine;
+     }
+
+     // Store energy members for rolling update
+     m_owner.m_memberDevices = energyMembers;
+
+         if (yMax > yMin || (yMax == 0.0 && yMin == 0.0)) {
+             applyAxisRange(axisY, roundAxisRange(yMin, yMax));
+         } else {
+             axisY->setRange(yMin - 5.0, yMax + 5.0);
+         }
 
         chart->legend()->show();
 
-        // Format current power for the overlay label (group total)
+        // Format current power for the overlay label (group total).
+        // For a stacked group, compute the signed sum across all energy members
+        // so that producer devices (negative) reduce the displayed total.
         QString currentText;
-        if (dev.energyStats.valid)
-            currentText = QString::number(dev.energyStats.power, 'f', 1) + " W";
+        if (dev.energyStats.valid) {
+            double groupTotal = 0.0;
+            for (const FritzDevice &m : energyMembers)
+                groupTotal += m.isProducer ? -m.energyStats.power : m.energyStats.power;
+            currentText = QString::number(groupTotal, 'f', 1) + " W";
+        }
 
         m_powerAxisX = axisX;
         m_powerAxisY = axisY;
@@ -144,52 +209,64 @@ void PowerChartBuilder::buildPowerChart(const FritzDevice &dev,
         tmpWindowCombo->setCurrentIndex(qBound(0, m_owner.m_windowComboIndex, 8));
         QObject::connect(tmpWindowCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), &m_owner,
                 [this](int idx){ m_owner.m_windowComboIndex = idx; m_owner.onWindowComboChanged(idx); m_owner.saveChartState(); });
-        m_owner.m_tabs->addTab(makeChartTab(chart, currentText, &m_powerValueLabel, m_owner.m_powerScrollBar, m_powerLockCheckBox, tmpWindowCombo), i18n("Power"));
+        QWidget *tab = makeChartTab(chart, currentText, &m_powerValueLabel, m_owner.m_powerScrollBar, m_powerLockCheckBox, tmpWindowCombo);
+        if (m_owner.m_powerTabInsertIndex >= 0)
+            m_owner.m_tabs->insertTab(m_owner.m_powerTabInsertIndex, tab, i18n("Power"));
+        else
+            m_owner.m_tabs->addTab(tab, i18n("Power"));
 
     } else {
-        // Single-device (or group with <2 energy members): original area chart
-        QLineSeries *series = new QLineSeries();
-        series->setName(i18n("Power (W)"));
+         // Single-device (or group with <2 energy members): original area chart
+         QLineSeries *series = new QLineSeries();
+         series->setName(i18n("Power (W)"));
 
-        {
-            QList<QPointF> points;
-            points.reserve(dev.powerHistory.size());
-            for (const auto &point : dev.powerHistory)
-                points.append(QPointF(point.first.toMSecsSinceEpoch(), point.second));
-            series->replace(downsampleMinMax(points));
-        }
+         {
+             QList<QPointF> points;
+             points.reserve(dev.powerHistory.size());
+             for (const auto &point : dev.powerHistory) {
+                 // Negate power for producer devices
+                 double power = dev.isProducer ? -point.second : point.second;
+                 points.append(QPointF(point.first.toMSecsSinceEpoch(), power));
+             }
+             series->replace(downsampleMinMax(points));
+         }
 
-        if (dev.powerHistory.isEmpty() && dev.energyStats.valid) {
-            series->append(QDateTime::currentDateTime().toMSecsSinceEpoch(), dev.energyStats.power);
-        }
+         if (dev.powerHistory.isEmpty() && dev.energyStats.valid) {
+             double power = dev.isProducer ? -dev.energyStats.power : dev.energyStats.power;
+             series->append(QDateTime::currentDateTime().toMSecsSinceEpoch(), power);
+         }
 
-        // Shaded area under the curve
-        QLineSeries *lower = new QLineSeries();
-        if (!dev.powerHistory.isEmpty()) {
-            lower->append(dev.powerHistory.first().first.toMSecsSinceEpoch(), 0);
-            lower->append(dev.powerHistory.last().first.toMSecsSinceEpoch(), 0);
-        } else {
-            qint64 now = QDateTime::currentDateTime().toMSecsSinceEpoch();
-            lower->append(now - 3600000, 0);
-            lower->append(now, 0);
-        }
+         // Shaded area under the curve (baseline is zero, or extends below if producer)
+         QLineSeries *lower = new QLineSeries();
+         if (!dev.powerHistory.isEmpty()) {
+             lower->append(dev.powerHistory.first().first.toMSecsSinceEpoch(), 0);
+             lower->append(dev.powerHistory.last().first.toMSecsSinceEpoch(), 0);
+         } else {
+             qint64 now = QDateTime::currentDateTime().toMSecsSinceEpoch();
+             lower->append(now - 3600000, 0);
+             lower->append(now, 0);
+         }
 
-        QAreaSeries *area = new QAreaSeries(series, lower);
-        QColor fillColor(0, 120, 215, 80);
-        area->setBrush(QBrush(fillColor));
-        QPen linePen(QColor(0, 120, 215));
-        linePen.setWidth(2);
-        area->setPen(linePen);
+         QAreaSeries *area = new QAreaSeries(series, lower);
+         QColor fillColor(0, 120, 215, 80);
+         area->setBrush(QBrush(fillColor));
+         QPen linePen(QColor(0, 120, 215));
+         linePen.setWidth(2);
+         area->setPen(linePen);
 
-        chart->addSeries(area);
-        area->attachAxis(axisX);
-        area->attachAxis(axisY);
+         chart->addSeries(area);
+         area->attachAxis(axisX);
+         area->attachAxis(axisY);
 
-        if (!dev.powerHistory.isEmpty()) {
-            double maxP = 0;
-            for (const auto &p : dev.powerHistory) maxP = qMax(maxP, p.second);
-            applyAxisRange(axisY, roundAxisRange(0.0, maxP));
-        }
+         if (!dev.powerHistory.isEmpty()) {
+             double minP = 0.0, maxP = 0.0;
+             for (const auto &p : dev.powerHistory) {
+                 double power = dev.isProducer ? -p.second : p.second;
+                 minP = qMin(minP, power);
+                 maxP = qMax(maxP, power);
+             }
+             applyAxisRange(axisY, roundAxisRange(minP, maxP));
+         }
 
         // Store axis/series pointers for in-place updates
         m_powerAxisX       = axisX;
@@ -199,15 +276,21 @@ void PowerChartBuilder::buildPowerChart(const FritzDevice &dev,
 
         // Format current power for the overlay label
         QString currentText;
-        if (dev.energyStats.valid)
-            currentText = QString::number(dev.energyStats.power, 'f', 1) + " W";
+        if (dev.energyStats.valid) {
+            double power = dev.isProducer ? -dev.energyStats.power : dev.energyStats.power;
+            currentText = QString::number(power, 'f', 1) + " W";
+        }
 
         QComboBox *tmpWindowCombo = new QComboBox();
         for (int i = 0; i < 9; ++i) tmpWindowCombo->addItem(i18n("Last %1", kWindowLabels[i]));
         tmpWindowCombo->setCurrentIndex(qBound(0, m_owner.m_windowComboIndex, 8));
         QObject::connect(tmpWindowCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), &m_owner,
                 [this](int idx){ m_owner.m_windowComboIndex = idx; m_owner.onWindowComboChanged(idx); m_owner.saveChartState(); });
-        m_owner.m_tabs->addTab(makeChartTab(chart, currentText, &m_powerValueLabel, m_owner.m_powerScrollBar, m_powerLockCheckBox, tmpWindowCombo), i18n("Power"));
+        QWidget *tab = makeChartTab(chart, currentText, &m_powerValueLabel, m_owner.m_powerScrollBar, m_powerLockCheckBox, tmpWindowCombo);
+        if (m_owner.m_powerTabInsertIndex >= 0)
+            m_owner.m_tabs->insertTab(m_owner.m_powerTabInsertIndex, tab, i18n("Power"));
+        else
+            m_owner.m_tabs->addTab(tab, i18n("Power"));
     }
 }
 
@@ -271,16 +354,21 @@ void PowerChartBuilder::updateRolling(const FritzDevice &device,
                            const QList<QPair<QDateTime, double>> &history,
                            double fallbackValue,
                            bool hasFallback,
-                           qint64 fallbackTs)
+                           qint64 fallbackTs,
+                           bool isProducer)
     {
         if (!series)
             return;
         QList<QPointF> points;
         points.reserve(history.size() + 1);
-        for (const auto &p : history)
-            points.append(QPointF(p.first.toMSecsSinceEpoch(), p.second));
-        if (history.isEmpty() && hasFallback)
-            points.append(QPointF(fallbackTs, fallbackValue));
+        for (const auto &p : history) {
+            double power = isProducer ? -p.second : p.second;
+            points.append(QPointF(p.first.toMSecsSinceEpoch(), power));
+        }
+        if (history.isEmpty() && hasFallback) {
+            double power = isProducer ? -fallbackValue : fallbackValue;
+            points.append(QPointF(fallbackTs, power));
+        }
         series->replace(downsampleMinMax(points));
     };
 
@@ -289,7 +377,7 @@ void PowerChartBuilder::updateRolling(const FritzDevice &device,
         qint64 fallbackTs = QDateTime::currentMSecsSinceEpoch();
         bool hasFallback = device.energyStats.valid;
         reloadSeries(m_powerSeries, device.powerHistory,
-                     device.energyStats.power, hasFallback, fallbackTs);
+                     device.energyStats.power, hasFallback, fallbackTs, device.isProducer);
         // Keep the lower (zero baseline) series in sync with the upper series
         // time range so QAreaSeries renders the fill correctly for all points.
         if (m_powerLowerSeries) {
@@ -305,9 +393,11 @@ void PowerChartBuilder::updateRolling(const FritzDevice &device,
             }
             m_powerLowerSeries->replace(lowerPts);
         }
-        if (m_powerSeries && m_powerValueLabel && device.energyStats.valid)
+        if (m_powerSeries && m_powerValueLabel && device.energyStats.valid) {
+            double power = device.isProducer ? -device.energyStats.power : device.energyStats.power;
             m_powerValueLabel->setText(
-                QString::number(device.energyStats.power, 'f', 1) + " W");
+                QString::number(power, 'f', 1) + " W");
+        }
     }
 
     // --- Stacked power (group mode) ---
@@ -328,23 +418,28 @@ void PowerChartBuilder::updateRolling(const FritzDevice &device,
         // rebuild is needed; skip rolling update and let the next updateDevice
         // call handle it.  Update the value label at minimum.
         if (energyMembers.size() != n) {
-            if (m_powerValueLabel && device.energyStats.valid)
-                m_powerValueLabel->setText(
-                    QString::number(device.energyStats.power, 'f', 1) + " W");
+            if (m_powerValueLabel && device.energyStats.valid) {
+                double groupTotal = 0.0;
+                for (const FritzDevice &m : energyMembers)
+                    groupTotal += m.isProducer ? -m.energyStats.power : m.energyStats.power;
+                m_powerValueLabel->setText(QString::number(groupTotal, 'f', 1) + " W");
+            }
         } else {
             // Update cached member list with fresh filtered devices
             m_owner.m_memberDevices = energyMembers;
 
-            // Build timestamp union across all members
-            QMap<qint64, QVector<double>> tsMap;
-            for (int i = 0; i < n; ++i) {
-                for (const auto &pt : m_owner.m_memberDevices.at(i).powerHistory) {
-                    qint64 ts = pt.first.toMSecsSinceEpoch();
-                    if (!tsMap.contains(ts))
-                        tsMap[ts] = QVector<double>(n, 0.0);
-                    tsMap[ts][i] = pt.second;
-                }
-            }
+             // Build timestamp union across all members
+             QMap<qint64, QVector<double>> tsMap;
+             for (int i = 0; i < n; ++i) {
+                 for (const auto &pt : m_owner.m_memberDevices.at(i).powerHistory) {
+                     qint64 ts = pt.first.toMSecsSinceEpoch();
+                     if (!tsMap.contains(ts))
+                         tsMap[ts] = QVector<double>(n, 0.0);
+                     // Negate power for producer devices
+                     double power = m_owner.m_memberDevices.at(i).isProducer ? -pt.second : pt.second;
+                     tsMap[ts][i] = power;
+                 }
+             }
 
             // Rebuild each stacked layer in-place using bulk replace()
             const QList<qint64> timestamps = tsMap.keys();
@@ -356,32 +451,46 @@ void PowerChartBuilder::updateRolling(const FritzDevice &device,
                 QList<QPointF> upperPts, lowerPts;
                 upperPts.reserve(timestamps.size());
                 lowerPts.reserve(timestamps.size());
-                for (qint64 ts : timestamps) {
-                    const QVector<double> &vals = tsMap[ts];
-                    double lowerVal = 0.0;
-                    for (int j = 0; j < i; ++j) lowerVal += vals[j];
-                    double upperVal = lowerVal + vals[i];
-                    upperPts.append(QPointF(ts, upperVal));
-                    lowerPts.append(QPointF(ts, lowerVal));
-                }
+                 for (qint64 ts : timestamps) {
+                     const QVector<double> &vals = tsMap[ts];
+                     auto [lowerVal, upperVal] = stackedBounds(vals, i);
+                     upperPts.append(QPointF(ts, upperVal));
+                     lowerPts.append(QPointF(ts, lowerVal));
+                 }
                 upper->replace(downsampleMinMax(upperPts));
                 lower->replace(downsampleMinMax(lowerPts));
             }
 
-            // Update power label to show group total
-            if (m_powerValueLabel && device.energyStats.valid)
-                m_powerValueLabel->setText(
-                    QString::number(device.energyStats.power, 'f', 1) + " W");
-        }
-    }
+            // Update net line
+            if (m_powerNetSeries) {
+                QList<QPointF> netPts;
+                netPts.reserve(timestamps.size());
+                for (qint64 ts : timestamps) {
+                    const QVector<double> &vals = tsMap[ts];
+                    double net = 0.0;
+                    for (double v : vals) net += v;
+                    netPts.append(QPointF(ts, net));
+                }
+                m_powerNetSeries->replace(downsampleMinMax(netPts));
+            }
 
-    // --- Humidity ---
-    {
-        qint64 fallbackTs = QDateTime::currentMSecsSinceEpoch();
-        bool hasFallback = device.humidityStats.valid;
-        reloadSeries(m_humiditySeries, device.humidityHistory,
-                     device.humidityStats.humidity, hasFallback, fallbackTs);
-    }
+            // Update power label to show signed group total (producers negated)
+            if (m_powerValueLabel && device.energyStats.valid) {
+                double groupTotal = 0.0;
+                for (const FritzDevice &m : m_owner.m_memberDevices)
+                    groupTotal += m.isProducer ? -m.energyStats.power : m.energyStats.power;
+                m_powerValueLabel->setText(QString::number(groupTotal, 'f', 1) + " W");
+            }
+         }
+      }
+
+      // --- Humidity ─────────────────────────────────────────────────────────
+      {
+          qint64 fallbackTs = QDateTime::currentMSecsSinceEpoch();
+          bool hasFallback = device.humidityStats.valid;
+          reloadSeries(m_humiditySeries, device.humidityHistory,
+                       device.humidityStats.humidity, hasFallback, fallbackTs, false);  // isProducer=false (humidity is never negated)
+      }
 }
 
 // ── Y-axis rescaling ────────────────────────────────────────────────────────
@@ -397,11 +506,9 @@ void PowerChartBuilder::rescaleYPower(qint64 minMs, qint64 maxMs)
         return;
     }
 
-    // Stacked mode: Y-max = sum of all member maxima within the window
+    // Stacked mode: compute min/max from all stacked values within the window
     if (!m_powerStackedUpper.isEmpty() && !m_owner.m_memberDevices.isEmpty()) {
-        // At each timestamp within the window, compute the cumulative sum.
-        // Simplification: sum up the per-device max values within the window.
-        double yMax = 0.0;
+        double yMin = 0.0, yMax = 0.0;
         bool found = false;
 
         // Build timestamp union again for the rescale window
@@ -413,7 +520,9 @@ void PowerChartBuilder::rescaleYPower(qint64 minMs, qint64 maxMs)
                 if (ts >= minMs && ts <= maxMs) {
                     if (!tsMap.contains(ts))
                         tsMap[ts] = QVector<double>(n, 0.0);
-                    tsMap[ts][i] = pt.second;
+                    // Negate power for producer devices
+                    double power = m_owner.m_memberDevices.at(i).isProducer ? -pt.second : pt.second;
+                    tsMap[ts][i] = power;
                     found = true;
                 }
             }
@@ -425,29 +534,43 @@ void PowerChartBuilder::rescaleYPower(qint64 minMs, qint64 maxMs)
                     qint64 ts = pt.first.toMSecsSinceEpoch();
                     if (!tsMap.contains(ts))
                         tsMap[ts] = QVector<double>(n, 0.0);
-                    tsMap[ts][i] = pt.second;
+                    // Negate power for producer devices
+                    double power = m_owner.m_memberDevices.at(i).isProducer ? -pt.second : pt.second;
+                    tsMap[ts][i] = power;
                 }
             }
         }
+        // Compute min/max using the same split consumer/producer stacking logic
         for (auto it = tsMap.constBegin(); it != tsMap.constEnd(); ++it) {
-            double sum = 0.0;
-            for (double v : it.value()) sum += v;
-            yMax = qMax(yMax, sum);
+            const QVector<double> &vals = it.value();
+            for (int i = 0; i < n; ++i) {
+                auto [lo, hi] = stackedBounds(vals, i);
+                yMin = qMin(yMin, lo);
+                yMax = qMax(yMax, hi);
+            }
         }
-        m_powerAxisY->setMin(0);
-        applyAxisRange(m_powerAxisY, roundAxisRange(0.0, yMax));
+        applyAxisRange(m_powerAxisY, roundAxisRange(yMin, yMax));
         return;
     }
 
     // Single-device mode
     double minVal, maxVal;
-    if (!scanHistoryRange(m_owner.m_device.powerHistory, minMs, maxMs, minVal, maxVal)) {
-        m_powerAxisY->setRange(0, 10);
+    if (!m_owner.m_device.powerHistory.isEmpty()) {
+        minVal = 0.0;
+        maxVal = 0.0;
+        for (const auto &p : m_owner.m_device.powerHistory) {
+            if (p.first.toMSecsSinceEpoch() >= minMs && p.first.toMSecsSinceEpoch() <= maxMs) {
+                double power = m_owner.m_device.isProducer ? -p.second : p.second;
+                minVal = qMin(minVal, power);
+                maxVal = qMax(maxVal, power);
+            }
+        }
+    } else {
+        m_powerAxisY->setRange(-5, 10);
         return;
     }
 
-    m_powerAxisY->setMin(0);
-    applyAxisRange(m_powerAxisY, roundAxisRange(0.0, maxVal));
+    applyAxisRange(m_powerAxisY, roundAxisRange(minVal, maxVal));
 }
 
 // ── Reset / teardown ────────────────────────────────────────────────────────
@@ -459,9 +582,11 @@ void PowerChartBuilder::reset()
     m_powerSeries      = nullptr;
     m_powerLowerSeries = nullptr;
     m_powerValueLabel  = nullptr;
+    m_powerLockCheckBox = nullptr;
 
     m_powerStackedUpper.clear();
     m_powerStackedLower.clear();
+    m_powerNetSeries   = nullptr;
 
     m_humiditySeries = nullptr;
 }

@@ -277,7 +277,7 @@ void ChartWidget::updateRollingCharts(const FritzDevice &device,
 
     m_tempBuilder.updateRolling(device, memberDevices);
     m_powerBuilder.updateRolling(device, memberDevices);
-    m_gaugeBuilder.updateRolling(device);
+    m_gaugeBuilder.updateRolling(device, memberDevices);
 
     updateScrollBar();
     applyTimeWindow();
@@ -297,11 +297,11 @@ static QList<double> energyValuesForGrid(const DeviceBasicStats &stats, int grid
 }
 
 static QList<double> groupEnergyValuesForGrid(
-    const QList<QPair<QString, DeviceBasicStats>> &memberStats, int grid)
+    const QList<MemberHistoryEntry> &memberStats, int grid)
 {
     QList<double> combined;
-    for (const auto &pair : memberStats)
-        combined += energyValuesForGrid(pair.second, grid);
+    for (const auto &entry : memberStats)
+        combined += energyValuesForGrid(entry.stats, grid);
     return combined;
 }
 
@@ -320,11 +320,11 @@ static int computeAvailableGrids(const DeviceBasicStats &stats)
 }
 
 static int computeAvailableGridsForGroup(
-    const QList<QPair<QString, DeviceBasicStats>> &memberStats)
+    const QList<MemberHistoryEntry> &memberStats)
 {
     int availableGrids = 0;
-    for (const auto &pair : memberStats)
-        availableGrids |= computeAvailableGrids(pair.second);
+    for (const auto &entry : memberStats)
+        availableGrids |= computeAvailableGrids(entry.stats);
     return availableGrids;
 }
 
@@ -353,7 +353,7 @@ void ChartWidget::updateEnergyStats(const DeviceBasicStats &stats)
     });
 }
 
-void ChartWidget::updateGroupEnergyStats(const QList<QPair<QString, DeviceBasicStats>> &memberStats)
+void ChartWidget::updateGroupEnergyStats(const QList<MemberHistoryEntry> &memberStats)
 {
     m_historyBuilder.groupEnergyErrors().clear();
 
@@ -465,6 +465,49 @@ void ChartWidget::replaceEnergyHistoryTab(const std::function<void()> &buildFn)
 
     saveChartState();
     updateSliderVisibility();
+}
+
+void ChartWidget::replaceEnergyGaugeTab()
+{
+    // Find the Energy tab by title and replace it in-place so the gauge
+    // labels reflect the updated isProducer flag immediately.
+    int gaugeIdx = -1;
+    for (int i = 0; i < m_tabs->count(); ++i) {
+        if (plainTabText(m_tabs->tabText(i)) == i18n("Energy")) {
+            gaugeIdx = i;
+            break;
+        }
+    }
+    if (gaugeIdx < 0)
+        return;
+
+    const QString savedTitle = plainTabText(m_tabs->tabText(m_tabs->currentIndex()));
+
+    m_tabs->blockSignals(true);
+
+    QWidget *old = m_tabs->widget(gaugeIdx);
+    m_tabs->removeTab(gaugeIdx);
+    m_gaugeBuilder.nullifyWidgetPointers(old);
+    delete old;
+
+    // buildEnergyGauge appends the new tab at the end; move it back
+    // to the original position so the tab order is preserved.
+    m_gaugeBuilder.buildEnergyGauge(m_device, m_memberDevices);
+    const int newIdx = m_tabs->count() - 1;
+    if (newIdx != gaugeIdx)
+        m_tabs->tabBar()->moveTab(newIdx, gaugeIdx);
+
+    int restoreIdx = m_tabs->currentIndex();
+    for (int i = 0; i < m_tabs->count(); ++i) {
+        if (plainTabText(m_tabs->tabText(i)) == savedTitle) {
+            restoreIdx = i;
+            break;
+        }
+    }
+    m_tabs->setCurrentIndex(restoreIdx);
+    m_tabs->blockSignals(false);
+
+    saveChartState();
 }
 
 // ---------------------------------------------------------------------------
@@ -595,6 +638,72 @@ bool ChartWidget::eventFilter(QObject *watched, QEvent *event)
     }
 
     return QWidget::eventFilter(watched, event);
+}
+
+// ---------------------------------------------------------------------------
+// Producer/Consumer status change: rebuild power charts with updated values
+// ---------------------------------------------------------------------------
+
+void ChartWidget::updateForDeviceProducerStatusChange(bool isProducer)
+{
+    // Sync the cached device's isProducer flag before rebuilding charts.
+    // m_device is a copy and would otherwise be stale until the next poll.
+    m_device.isProducer = isProducer;
+
+    if (!m_device.hasEnergyMeter() && !m_device.isGroup())
+        return;
+
+    // Remove the existing Power tab before rebuilding so we don't accumulate
+    // duplicate tabs on every checkbox toggle.  Preserve the active tab by
+    // name so the user's current tab selection survives the replacement.
+    const QString savedTitle = plainTabText(m_tabs->tabText(m_tabs->currentIndex()));
+
+    m_tabs->blockSignals(true);
+    for (int i = m_tabs->count() - 1; i >= 0; --i) {
+        if (plainTabText(m_tabs->tabText(i)) == i18n("Power")) {
+            // Remember the tab's position so buildPowerChart can re-insert it
+            // at the same index rather than appending it to the end.
+            m_powerTabInsertIndex = i;
+            // Reparent m_powerScrollBar back to this widget before deleting the
+            // tab container — otherwise the scroll bar (reparented into the tab
+            // by makeChartTab) would be destroyed along with the old tab and
+            // leave a dangling pointer used by the subsequent buildPowerChart.
+            if (m_powerScrollBar)
+                m_powerScrollBar->setParent(this);
+            QWidget *old = m_tabs->widget(i);
+            m_tabs->removeTab(i);
+            delete old;
+            m_powerBuilder.reset();
+            break;
+        }
+    }
+
+    m_powerBuilder.buildPowerChart(m_device, m_memberDevices);
+    m_powerTabInsertIndex = -1;  // reset after use
+
+    // Restore active tab by name (index may have shifted after removal/insert)
+    int restoreIdx = m_tabs->currentIndex();
+    for (int i = 0; i < m_tabs->count(); ++i) {
+        if (plainTabText(m_tabs->tabText(i)) == savedTitle) {
+            restoreIdx = i;
+            break;
+        }
+    }
+    m_tabs->setCurrentIndex(restoreIdx);
+    m_tabs->blockSignals(false);
+
+    saveChartState();
+
+    // Rebuild the Energy gauge and Energy History tabs so they reflect the
+    // updated isProducer flag immediately (without waiting for the next poll).
+    replaceEnergyGaugeTab();
+
+    replaceEnergyHistoryTab([this]() {
+        if (m_historyBuilder.m_groupHistoryMode)
+            m_historyBuilder.buildEnergyHistoryChartStacked(m_historyBuilder.m_lastGroupMemberStats);
+        else
+            m_historyBuilder.buildEnergyHistoryChart(m_historyBuilder.m_lastEnergyStats);
+    });
 }
 
 // ---------------------------------------------------------------------------

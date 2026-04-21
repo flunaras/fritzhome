@@ -2,6 +2,7 @@
 #include <QVBoxLayout>
 #include <QFormLayout>
 #include <QGroupBox>
+#include <QCheckBox>
 #include "i18n_shim.h"
 
 EnergyWidget::EnergyWidget(FritzApi *api, QWidget *parent)
@@ -9,7 +10,8 @@ EnergyWidget::EnergyWidget(FritzApi *api, QWidget *parent)
 {
     auto *layout = new QVBoxLayout(this);
     auto *grp = new QGroupBox(i18n("Energy Meter"), this);
-    auto *form = new QFormLayout(grp);
+    auto *grpLayout = new QVBoxLayout(grp);
+    auto *form = new QFormLayout();
 
     m_powerLabel   = new QLabel("--", grp);
     m_energyLabel  = new QLabel("--", grp);
@@ -21,8 +23,19 @@ EnergyWidget::EnergyWidget(FritzApi *api, QWidget *parent)
     form->addRow(i18n("Total Energy:"),  m_energyLabel);
     form->addRow(i18n("Voltage:"),       m_voltageLabel);
 
+    // Producer checkbox — always shown for EnergyWidget (energy-only devices always have a meter)
+    m_producerCheckBox = new QCheckBox(i18n("This device is a power producer (negate power chart)"), grp);
+
+    grpLayout->addLayout(form);
+    grpLayout->addWidget(m_producerCheckBox);
+
     layout->addWidget(grp);
     layout->addStretch();
+
+    // Producer checkbox: emit signal so MainWindow can persist and rebuild charts
+    connect(m_producerCheckBox, &QCheckBox::toggled, this, [this](bool checked) {
+        emit producerStatusChanged(m_device.ain, checked);
+    });
 }
 
 void EnergyWidget::updateDevice(const FritzDevice &device)
@@ -40,4 +53,12 @@ void EnergyWidget::updateDevice(const FritzDevice &device)
         m_energyLabel->setText(i18n("n/a"));
         m_voltageLabel->setText(i18n("n/a"));
     }
+
+    // Update checkbox state without triggering producerStatusChanged signal.
+    // Hide the checkbox for group devices — groups have no single producer flag;
+    // the per-member flag on each native device controls chart sign instead.
+    m_producerCheckBox->setVisible(!device.isGroup());
+    m_producerCheckBox->blockSignals(true);
+    m_producerCheckBox->setChecked(device.isProducer);
+    m_producerCheckBox->blockSignals(false);
 }

@@ -10,7 +10,6 @@
 /// tab insertion, event filter installation, and settings persistence.
 
 #include <QList>
-#include <QPair>
 #include <QString>
 #include <QStringList>
 #include <QVector>
@@ -45,6 +44,14 @@ struct EnergyCategories {
     int barsToShow = 0;
 };
 
+/// Per-member entry for the stacked energy history chart.
+/// Carries the display name, statistics, and producer flag for each group member.
+struct MemberHistoryEntry {
+    QString          name;
+    DeviceBasicStats stats;
+    bool             isProducer = false;
+};
+
 /// Builds and manages the Energy History chart tab (single-device and group).
 /// Non-QObject value type; owned by ChartWidget as a plain member.
 class EnergyHistoryBuilder
@@ -57,7 +64,7 @@ public:
 
     /// Build the stacked energy history bar chart (group mode).
     void buildEnergyHistoryChartStacked(
-        const QList<QPair<QString, DeviceBasicStats>> &memberStats);
+        const QList<MemberHistoryEntry> &memberStats);
 
     /// Build a placeholder tab when no data is available for the selected view.
     void buildEnergyHistoryPlaceholder(const QStringList &viewLabels,
@@ -85,8 +92,8 @@ public:
     const DeviceBasicStats &lastEnergyStats() const { return m_lastEnergyStats; }
 
     /// Access the cached group member stats.
-    QList<QPair<QString, DeviceBasicStats>>       &lastGroupMemberStats()       { return m_lastGroupMemberStats; }
-    const QList<QPair<QString, DeviceBasicStats>> &lastGroupMemberStats() const { return m_lastGroupMemberStats; }
+    QList<MemberHistoryEntry>       &lastGroupMemberStats()       { return m_lastGroupMemberStats; }
+    const QList<MemberHistoryEntry> &lastGroupMemberStats() const { return m_lastGroupMemberStats; }
 
     /// Access error tracking state.
     int  &lastAvailableGrids()    { return m_lastAvailableGrids; }
@@ -114,7 +121,7 @@ private:
         QChart *chart,
         QAbstractSeries *barSeries,
         const EnergyCategories &cats,
-        int grid, bool useKwh, double maxY);
+        int grid, bool useKwh, double minY, double maxY);
 
     /// Build the container, install event filters, set member state, insert tab.
     void finalizeEnergyHistoryTab(QChartView *chartView,
@@ -134,7 +141,7 @@ private:
 
     // Group energy history mode
     bool        m_groupHistoryMode       = false;
-    QList<QPair<QString, DeviceBasicStats>> m_lastGroupMemberStats;
+    QList<MemberHistoryEntry> m_lastGroupMemberStats;
     QStringList m_groupEnergyErrors;
 
     // Energy history error tracking

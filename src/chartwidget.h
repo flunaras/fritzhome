@@ -14,7 +14,6 @@
 #include <QComboBox>
 #include <QCheckBox>
 #include <QList>
-#include <QPair>
 #include <QString>
 #include <QPointer>
 #include <functional>
@@ -74,7 +73,7 @@ public:
     /// Called by MainWindow when per-member getbasicdevicestats replies have all
     /// arrived for the currently selected group device.  Rebuilds the Energy
     /// History tab with a stacked bar chart (one colour per member).
-    void updateGroupEnergyStats(const QList<QPair<QString, DeviceBasicStats>> &memberStats);
+    void updateGroupEnergyStats(const QList<MemberHistoryEntry> &memberStats);
 
     /// Called by MainWindow when an error occurs fetching energy stats for the
     /// currently selected device. Updates the placeholder with error message(s).
@@ -82,12 +81,17 @@ public:
 
     /// Called by MainWindow when an error occurs fetching energy stats for a
     /// group member. Updates the placeholder with accumulated error message(s).
-    void updateGroupEnergyStatsError(const QString &memberName, const QString &error);
+     void updateGroupEnergyStatsError(const QString &memberName, const QString &error);
 
-    /// Returns the grid interval (in seconds) of the currently displayed energy
-    /// history view: 900 (15-min / 24 h), 86400 (daily), 2678400 (monthly), or
-    /// 0 if no energy history tab has been built yet.
-    int activeEnergyGrid() const { return m_historyBuilder.activeEnergyGrid(); }
+     /// Called by MainWindow after a device's producer/consumer status is toggled.
+     /// Rebuilds power charts with updated (negated) producer values.
+     /// \a isProducer is the new value — passed explicitly to avoid stale m_device cache.
+     void updateForDeviceProducerStatusChange(bool isProducer);
+
+     /// Returns the grid interval (in seconds) of the currently displayed energy
+     /// history view: 900 (15-min / 24 h), 86400 (daily), 2678400 (monthly), or
+     /// 0 if no energy history tab has been built yet.
+     int activeEnergyGrid() const { return m_historyBuilder.activeEnergyGrid(); }
 
 private slots:
     void onWindowComboChanged(int index);
@@ -122,6 +126,11 @@ private:
     /// \a buildFn to insert the new one, and restore the previously active tab.
     void replaceEnergyHistoryTab(const std::function<void()> &buildFn);
 
+    // -- energy gauge tab replacement ------------------------------------------
+    /// Replace the Energy tab in-place (used when producer status changes so
+    /// the gauge labels update immediately without waiting for the next poll).
+    void replaceEnergyGaugeTab();
+
     // -- time-window helpers (for rolling-poll charts) -----------------------
     /// Returns the selected window duration in milliseconds.
     qint64 windowMs() const;
@@ -142,6 +151,7 @@ private:
     int m_windowComboIndex = 2;             ///< selected time-window index (persisted)
     QScrollBar  *m_scrollBar       = nullptr;  ///< horizontal scroll (Temperature tab)
     QScrollBar  *m_powerScrollBar  = nullptr;  ///< horizontal scroll (Power tab)
+    int          m_powerTabInsertIndex = -1;   ///< insertion index for Power tab rebuild (-1 = append)
 
     // -- scroll state ---------------------------------------------------------
     bool m_scrollAtEnd = true;

@@ -224,8 +224,10 @@ QVariant DeviceModel::data(const QModelIndex &index, int role) const
             }
             return QString("-");
         case ColPower:
-            if (dev.hasEnergyMeter() && dev.energyStats.valid)
-                return QString("%1 W").arg(dev.energyStats.power, 0, 'f', 1);
+            if (dev.hasEnergyMeter() && dev.energyStats.valid) {
+                const double power = dev.isProducer ? -dev.energyStats.power : dev.energyStats.power;
+                return QString("%1 W").arg(power, 0, 'f', 1);
+            }
             return QString("-");
         case ColPresent: return dev.present ? i18n("Online") : i18n("Offline");
         }
@@ -249,8 +251,9 @@ QVariant DeviceModel::data(const QModelIndex &index, int role) const
         if (dev.hasSwitch())
             tip += QString("Switch: %1<br/>").arg(dev.switchStats.on ? i18n("On") : i18n("Off"));
         if (dev.hasEnergyMeter() && dev.energyStats.valid) {
-            tip += QString("Power: %1 W<br/>").arg(dev.energyStats.power, 0, 'f', 1);
-            tip += QString("Energy: %1 Wh<br/>").arg(dev.energyStats.energy, 0, 'f', 0);
+            const double sign = dev.isProducer ? -1.0 : 1.0;
+            tip += QString("Power: %1 W<br/>").arg(sign * dev.energyStats.power, 0, 'f', 1);
+            tip += QString("Energy: %1 Wh<br/>").arg(sign * dev.energyStats.energy, 0, 'f', 0);
             tip += QString("Voltage: %1 V<br/>").arg(dev.energyStats.voltage, 0, 'f', 1);
         }
         if (dev.hasThermostat()) {
@@ -285,6 +288,26 @@ QVariant DeviceModel::headerData(int section, Qt::Orientation orientation, int r
     case ColPresent:     return i18n("Availability");
     }
     return QVariant();
+}
+
+// ---------------------------------------------------------------------------
+// Producer/Consumer status management
+// ---------------------------------------------------------------------------
+
+void DeviceModel::updateDeviceProducerStatus(const QString &ain, bool isProducer)
+{
+    // Find the device and update its producer status
+    for (int gi = 0; gi < m_groups.size(); ++gi) {
+        for (int di = 0; di < m_groups[gi].devices.size(); ++di) {
+            if (m_groups[gi].devices[di].ain == ain) {
+                m_groups[gi].devices[di].isProducer = isProducer;
+                // Emit dataChanged for this cell
+                QModelIndex idx = index(di, 0, index(gi, 0));
+                emit dataChanged(idx, idx);
+                return;
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -38,7 +38,9 @@ public:
                           const FritzDeviceList &memberDevices = FritzDeviceList());
 
     /// Update gauge labels in-place from fresh device data (rolling poll).
-    void updateRolling(const FritzDevice &device);
+    /// For group devices, \a memberDevices is used to compute net signed values.
+    void updateRolling(const FritzDevice &device,
+                       const FritzDeviceList &memberDevices = FritzDeviceList());
 
     /// Update pie labels (after energy stats arrive for group members).
     void updateGroupPieLabels();

@@ -132,10 +132,10 @@ void MainWindow::setupDeviceTree(QSplitter *splitter)
     m_deviceTree->setItemsExpandable(true);
     m_deviceTree->setUniformRowHeights(false);
     m_deviceTree->setSortingEnabled(false);  // no proxy model, keep insertion order
-    m_deviceTree->setMinimumWidth(320);
-    m_deviceTree->header()->setSectionResizeMode(QHeaderView::Interactive);
-    m_deviceTree->header()->setMinimumSectionSize(50);
-    leftLayout->addWidget(m_deviceTree, 1);
+     m_deviceTree->setMinimumWidth(320);
+     m_deviceTree->header()->setSectionResizeMode(QHeaderView::Interactive);
+     m_deviceTree->header()->setMinimumSectionSize(50);
+     leftLayout->addWidget(m_deviceTree, 1);
 
     // Polling interval row below the tree
     QHBoxLayout *intervalRow = new QHBoxLayout();
@@ -261,15 +261,16 @@ void MainWindow::wireSignals()
                      if (m_groupStatsPending == 0) {
                          // All member stats arrived — build the stacked history chart
                          // in device-list order (m_groupMemberOrder), not QMap alphabetical.
-                         // Pair first = device name (for legend/tooltip), second = stats.
-                         QList<QPair<QString, DeviceBasicStats>> memberStats;
+                         QList<MemberHistoryEntry> memberStats;
                          for (const QString &memberAin : m_groupMemberOrder) {
                              auto it = m_groupMemberStats.constFind(memberAin);
                              if (it != m_groupMemberStats.constEnd()) {
                                  FritzDevice memberDev = m_model->deviceByAin(memberAin);
-                                 const QString label = memberDev.name.isEmpty()
-                                     ? memberAin : memberDev.name;
-                                 memberStats.append({label, it.value()});
+                                 MemberHistoryEntry entry;
+                                 entry.name       = memberDev.name.isEmpty() ? memberAin : memberDev.name;
+                                 entry.stats      = it.value();
+                                 entry.isProducer = memberDev.isProducer;
+                                 memberStats.append(entry);
                              }
                          }
                          m_chartWidget->updateGroupEnergyStats(memberStats);
@@ -303,15 +304,26 @@ void MainWindow::wireSignals()
     connect(m_deviceTree->selectionModel(), &QItemSelectionModel::currentChanged,
             this, &MainWindow::onDeviceSelected);
 
-    // Polling interval spinbox
-    connect(m_intervalSpin, QOverload<int>::of(&QSpinBox::valueChanged),
-            this, [this](int seconds) {
-                m_pollingInterval = seconds;
-                QSettings s;
-                s.setValue(QStringLiteral("connection/interval"), seconds);
-                if (m_api->isLoggedIn())
-                    m_api->startPolling(seconds * 1000);
-            });
+    // Producer checkbox signal from device panels — persist setting and rebuild charts
+    // Walk all scroll-area-wrapped DeviceWidgets in the control stack
+    for (int i = 1; i < m_controlStack->count(); ++i) {
+        QScrollArea *sa = qobject_cast<QScrollArea *>(m_controlStack->widget(i));
+        if (!sa) continue;
+        DeviceWidget *dw = qobject_cast<DeviceWidget *>(sa->widget());
+        if (!dw) continue;
+        connect(dw, &DeviceWidget::producerStatusChanged,
+                this, &MainWindow::setDeviceProducerStatus);
+    }
+
+     // Polling interval spinbox
+     connect(m_intervalSpin, QOverload<int>::of(&QSpinBox::valueChanged),
+             this, [this](int seconds) {
+                 m_pollingInterval = seconds;
+                 QSettings s;
+                 s.setValue(QStringLiteral("connection/interval"), seconds);
+                 if (m_api->isLoggedIn())
+                     m_api->startPolling(seconds * 1000);
+             });
 }
 
 void MainWindow::restoreSettings()
@@ -723,6 +735,9 @@ void MainWindow::onDeviceListUpdated(const FritzDeviceList &devices)
     const bool firstLoad = expandedGroups.isEmpty() && m_model->rowCount() == 0;
 
     m_model->updateDevices(devices);
+    // Re-apply saved producer flags after every model reset (updateDevices
+    // rebuilds from scratch, losing any runtime-only isProducer state).
+    loadProducerSettings();
 
     initColumnSizes(devices);
     restoreTreeState(expandedGroups, firstLoad);
@@ -978,4 +993,38 @@ void MainWindow::setStatusMessage(const QString &msg)
 {
     m_statusLabel->setText(msg);
     statusBar()->showMessage(msg, 0);
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Persist producer/consumer status for a device and rebuild charts.
+// Called from device widget signals (producerStatusChanged) when the checkbox is toggled.
+void MainWindow::setDeviceProducerStatus(const QString &ain, bool isProducer)
+{
+    // Persist to QSettings
+    QSettings s;
+    s.setValue(QStringLiteral("devices/%1/isProducer").arg(ain), isProducer);
+
+    // Update model so future device list updates and chart rebuilds see the correct flag
+    m_model->updateDeviceProducerStatus(ain, isProducer);
+
+    // Rebuild power charts immediately if the affected device is currently selected
+    if (ain == m_selectedAin) {
+        m_chartWidget->updateForDeviceProducerStatusChange(isProducer);
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Load all producer/consumer settings from QSettings and apply to the device model.
+// Must be called after updateDevices() so the model is populated.
+void MainWindow::loadProducerSettings()
+{
+    QSettings s;
+    s.beginGroup(QStringLiteral("devices"));
+    const QStringList ains = s.childGroups();
+    for (const QString &ain : ains) {
+        bool isProducer = s.value(QStringLiteral("%1/isProducer").arg(ain), false).toBool();
+        if (isProducer)
+            m_model->updateDeviceProducerStatus(ain, true);
+    }
+    s.endGroup();
 }

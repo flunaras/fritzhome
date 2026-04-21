@@ -20,6 +20,11 @@ public:
     // Default implementation is a no-op; only SwitchWidget overrides this.
     virtual void setMembers(const FritzDeviceList &members) { Q_UNUSED(members) }
 
+signals:
+    /// Emitted when the user toggles the "This device is a producer" checkbox.
+    /// Connected by MainWindow to persist the setting and rebuild power charts.
+    void producerStatusChanged(const QString &ain, bool isProducer);
+
 protected:
     FritzApi *m_api;
     FritzDevice m_device;

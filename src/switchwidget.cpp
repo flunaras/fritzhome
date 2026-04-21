@@ -7,6 +7,7 @@
 #include <QAction>
 #include <QPixmap>
 #include <QPainter>
+#include <QCheckBox>
 #include "i18n_shim.h"
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -62,8 +63,10 @@ SwitchWidget::SwitchWidget(FritzApi *api, QWidget *parent)
     auto *layout = new QVBoxLayout(this);
 
     auto *grp = new QGroupBox(i18n("Switch Control"), this);
-    auto *grpLayout = new QVBoxLayout(grp);
+    auto *grpLayout = new QHBoxLayout(grp);
 
+    // Left column: status, lock info, action buttons
+    auto *leftLayout = new QVBoxLayout;
     m_statusLabel = new QLabel(i18n("Status: Unknown"), grp);
     m_statusLabel->setStyleSheet("font-size: 16pt; font-weight: bold;");
     m_lockedLabel = new QLabel(grp);
@@ -77,14 +80,25 @@ SwitchWidget::SwitchWidget(FritzApi *api, QWidget *parent)
     btnLayout->addWidget(m_offBtn);
     btnLayout->addWidget(m_toggleBtn);
 
-    grpLayout->addWidget(m_statusLabel);
-    grpLayout->addWidget(m_lockedLabel);
-    grpLayout->addLayout(btnLayout);
+    leftLayout->addWidget(m_statusLabel);
+    leftLayout->addWidget(m_lockedLabel);
+    leftLayout->addLayout(btnLayout);
+
+    // Producer checkbox — only visible for energy-capable devices (hasEnergyMeter()).
+    // Hidden on construction; updateDevice() shows/hides it based on device capabilities.
+    // Placed top-right to avoid increasing the widget height.
+    m_producerCheckBox = new QCheckBox(i18n("Power producer"), grp);
+    m_producerCheckBox->setToolTip(i18n("This device is a power producer (negates power/energy values in charts)"));
+    m_producerCheckBox->setVisible(false);
+
+    grpLayout->addLayout(leftLayout);
+    grpLayout->addStretch();
+    grpLayout->addWidget(m_producerCheckBox, 0, Qt::AlignTop);
 
     layout->addWidget(grp);
     layout->addStretch();
 
-    // Main-button clicks → act on the group/device AIN
+     // Main-button clicks → act on the group/device AIN
     connect(m_onBtn,     &QToolButton::clicked, this, [this]() {
         m_api->setSwitchOn(m_device.ain);
     });
@@ -100,6 +114,11 @@ SwitchWidget::SwitchWidget(FritzApi *api, QWidget *parent)
             m_api->setSwitchOff(m_device.ain);
         else
             m_api->setSwitchOn(m_device.ain);
+    });
+
+    // Producer checkbox: emit signal so MainWindow can persist and rebuild charts
+    connect(m_producerCheckBox, &QCheckBox::toggled, this, [this](bool checked) {
+        emit producerStatusChanged(m_device.ain, checked);
     });
 }
 
@@ -217,9 +236,22 @@ void SwitchWidget::updateDevice(const FritzDevice &device)
     } else {
         m_toggleBtn->setEnabled(canControl);
         m_toggleBtn->setPopupMode(QToolButton::MenuButtonPopup);
-        QFont f = m_toggleBtn->font();
-        f.setItalic(false);
-        m_toggleBtn->setFont(f);
-        m_toggleBtn->setToolTip(QString());
-    }
+         QFont f = m_toggleBtn->font();
+         f.setItalic(false);
+         m_toggleBtn->setFont(f);
+         m_toggleBtn->setToolTip(QString());
+     }
+
+     // Show the producer checkbox only for energy-capable native devices.
+     // Groups do not expose a per-group producer flag — each member has its own.
+     // Block signals while updating the checked state to avoid a spurious
+     // producerStatusChanged emission on every poll tick.
+     if (device.hasEnergyMeter() && !device.isGroup()) {
+         m_producerCheckBox->setVisible(true);
+         m_producerCheckBox->blockSignals(true);
+         m_producerCheckBox->setChecked(device.isProducer);
+         m_producerCheckBox->blockSignals(false);
+     } else {
+         m_producerCheckBox->setVisible(false);
+     }
 }

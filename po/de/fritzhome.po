@@ -633,3 +633,22 @@ msgstr "Fehler beim Abrufen des Energieverlaufs: %1"
 
 msgid "Error fetching energy history for group:\n%1"
 msgstr "Fehler beim Abrufen des Energieverlaufs für die Gruppe:\n%1"
+
+# ── Producer / consumer ────────────────────────────────────────────────────────
+msgid "Power producer"
+msgstr "Stromerzeuger"
+
+msgid "This device is a power producer (negates power/energy values in charts)"
+msgstr "Dieses Gerät ist ein Stromerzeuger (Leistungs- und Energiewerte werden in Diagrammen negiert)"
+
+msgid "This device is a power producer (negate power chart)"
+msgstr "Dieses Gerät ist ein Stromerzeuger (Leistungsdiagramm negieren)"
+
+msgid "Total Energy Produced"
+msgstr "Gesamtenergieerzeugung"
+
+msgid "Net Energy (Group)"
+msgstr "Netto-Energie (Gruppe)"
+
+msgid "Net"
+msgstr "Netto"

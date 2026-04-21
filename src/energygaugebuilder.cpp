@@ -328,14 +328,40 @@ void EnergyGaugeBuilder::buildEnergyGauge(const FritzDevice &dev,
     };
 
     if (dev.energyStats.valid) {
-        double kwh = dev.energyStats.energy / 1000.0;
-        vl->addWidget(makeLabel(i18n("Total Energy Consumed"), 11, false));
+        // For a group, compute the net signed energy and power from members
+        // (producers subtract, consumers add).  For a single device, negate
+        // the raw value when the device is marked as a producer.
+        double kwh;
+        double power;
+        QString energyHeading;
+        if (dev.isGroup()) {
+            double netEnergy = 0.0;
+            double netPower  = 0.0;
+            for (const FritzDevice &mem : memberDevices) {
+                if (mem.hasEnergyMeter() && mem.energyStats.valid) {
+                    const double sign = mem.isProducer ? -1.0 : 1.0;
+                    netEnergy += sign * mem.energyStats.energy;
+                    netPower  += sign * mem.energyStats.power;
+                }
+            }
+            kwh          = netEnergy / 1000.0;
+            power        = netPower;
+            energyHeading = i18n("Net Energy (Group)");
+        } else {
+            const double sign = dev.isProducer ? -1.0 : 1.0;
+            // The heading already communicates direction ("Produced" / "Consumed"),
+            // so display the absolute kWh value to avoid a double-negative.
+            kwh          = qAbs(sign * dev.energyStats.energy / 1000.0);
+            power        = sign * dev.energyStats.power;
+            energyHeading = dev.isProducer ? i18n("Total Energy Produced") : i18n("Total Energy Consumed");
+        }
+        vl->addWidget(makeLabel(energyHeading, 11, false));
         m_gaugeKwhLabel = makeLabel(QString::number(kwh, 'f', 3) + " kWh", 28, true);
         vl->addWidget(m_gaugeKwhLabel);
         vl->addSpacing(16);
 
         vl->addWidget(makeLabel(i18n("Current Power"), 11, false));
-        m_gaugePowerLabel = makeLabel(QString::number(dev.energyStats.power, 'f', 1) + " W", 22, true);
+        m_gaugePowerLabel = makeLabel(QString::number(power, 'f', 1) + " W", 22, true);
         vl->addWidget(m_gaugePowerLabel);
 
         if (dev.energyStats.voltage > 0) {
@@ -358,9 +384,14 @@ void EnergyGaugeBuilder::buildEnergyGauge(const FritzDevice &dev,
         for (const FritzDevice &mem : memberDevices) {
             if (mem.hasEnergyMeter() && mem.energyStats.valid) {
                 const QString label = mem.name.isEmpty() ? mem.ain : mem.name;
-                memberEnergies.append({ label, mem.energyStats.energy });
+                // Store signed energy: negative for producers, positive for consumers.
+                // The pie slice will use the absolute magnitude for sizing, but
+                // labels/tooltips will reflect the sign.
+                const double sign = mem.isProducer ? -1.0 : 1.0;
+                memberEnergies.append({ label, sign * mem.energyStats.energy });
             }
         }
+
     if (!memberEnergies.isEmpty()) {
         // Build or update the pie series and view stored in members so we
         // can update it dynamically when new per-member stats arrive.
@@ -380,14 +411,17 @@ void EnergyGaugeBuilder::buildEnergyGauge(const FritzDevice &dev,
 
             int idx = 0;
             double total = 0.0;
-            for (const auto &p : memberEnergies) total += p.second;
+            for (const auto &p : memberEnergies) total += std::abs(p.second);
             for (const auto &p : memberEnergies) {
-                QPieSlice *slice = pie->append(p.first, p.second);
+                // Use absolute value for slice size (QPieSeries requires positive values).
+                // Store the signed value as a property so labels can show negatives.
+                QPieSlice *slice = pie->append(p.first, std::abs(p.second));
                 QColor c = kChartPalette[idx % kChartPaletteSize];
                 c.setAlpha(200);
                 slice->setColor(c);
-                // Store raw member name for later label/tooltip composition.
+                // Store raw member name and signed energy for label/tooltip composition.
                 slice->setProperty("memberName", p.first);
+                slice->setProperty("signedEnergy", p.second);
                 ++idx;
             }
 
@@ -454,27 +488,33 @@ void EnergyGaugeBuilder::updateGroupPieLabels()
     if (!m_groupEnergyPie)
         return;
 
-    // Compute total to decide on unit scaling (Wh vs kWh)
+    // Compute total absolute Wh to decide on unit scaling (Wh vs kWh)
+    // and to compute percentages.
     double totalWh = 0.0;
     for (QPieSlice *s : m_groupEnergyPie->slices()) {
-        totalWh += s->value();
+        totalWh += s->value();  // s->value() is always the absolute magnitude
     }
     // Use kWh when typical absolute values exceed 1000 Wh
     const bool useKwh = (totalWh >= 1000.0);
     const double scale = useKwh ? 0.001 : 1.0;
     const QString unit = useKwh ? i18n("kWh") : i18n("Wh");
 
-    // Update each slice label to include both absolute and percent values.
+    // Update each slice label to include both signed value and percent.
     for (QPieSlice *s : m_groupEnergyPie->slices()) {
-        double val = s->value();
-        double pct = (totalWh > 0.0) ? (val / totalWh * 100.0) : 0.0;
-        const double absVal = val * scale;
+        // Use signedEnergy property for display (negative for producers).
+        // Fall back to s->value() if property not set (should not happen).
+        const double signedWh = s->property("signedEnergy").isValid()
+                                ? s->property("signedEnergy").toDouble()
+                                : s->value();
+        const double absWh = s->value();  // absolute magnitude for percentage
+        double pct = (totalWh > 0.0) ? (absWh / totalWh * 100.0) : 0.0;
+        const double displayVal = signedWh * scale;
         QString name = s->property("memberName").toString();
         if (name.isEmpty()) name = s->label();
-        // Example: "Living Room: 1.234 kWh (12.3 %)"
+        // Example: "Living Room: 1.234 kWh (12.3 %)" or "-0.567 kWh (8.4 %)" for producer
         s->setLabel(QString::fromUtf8("%1: %2 %3 (%4 %)")
                     .arg(name)
-                    .arg(absVal, 0, 'f', useKwh ? 3 : 1)
+                    .arg(displayVal, 0, 'f', useKwh ? 3 : 1)
                     .arg(unit)
                     .arg(pct, 0, 'f', 1));
     }
@@ -486,15 +526,36 @@ void EnergyGaugeBuilder::updateGroupPieLabels()
 
 // ── Rolling update ──────────────────────────────────────────────────────────
 
-void EnergyGaugeBuilder::updateRolling(const FritzDevice &device)
+void EnergyGaugeBuilder::updateRolling(const FritzDevice &device,
+                                        const FritzDeviceList &memberDevices)
 {
     if (device.energyStats.valid) {
+        double energy = device.energyStats.energy;
+        double power  = device.energyStats.power;
+        if (device.isGroup()) {
+            // Compute net signed energy and power from members.
+            double netEnergy = 0.0;
+            double netPower  = 0.0;
+            for (const FritzDevice &mem : memberDevices) {
+                if (mem.hasEnergyMeter() && mem.energyStats.valid) {
+                    const double sign = mem.isProducer ? -1.0 : 1.0;
+                    netEnergy += sign * mem.energyStats.energy;
+                    netPower  += sign * mem.energyStats.power;
+                }
+            }
+            energy = netEnergy;
+            power  = netPower;
+        } else {
+            const double sign = device.isProducer ? -1.0 : 1.0;
+            energy = sign * device.energyStats.energy;
+            power  = sign * device.energyStats.power;
+        }
         if (m_gaugeKwhLabel)
             m_gaugeKwhLabel->setText(
-                QString::number(device.energyStats.energy / 1000.0, 'f', 3) + " kWh");
+                QString::number(energy / 1000.0, 'f', 3) + " kWh");
         if (m_gaugePowerLabel)
             m_gaugePowerLabel->setText(
-                QString::number(device.energyStats.power, 'f', 1) + " W");
+                QString::number(power, 'f', 1) + " W");
         if (m_gaugeVoltageLabel && device.energyStats.voltage > 0)
             m_gaugeVoltageLabel->setText(
                 QString::number(device.energyStats.voltage, 'f', 1) + " V");

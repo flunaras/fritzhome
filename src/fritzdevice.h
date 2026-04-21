@@ -149,6 +149,7 @@ struct FritzDevice {
     QString productname;
     QString name;            // device name
     bool present = false;    // currently reachable
+    bool isProducer = false; // user-configured: true if device generates power (solar, battery, etc.)
 
     // Temperature (if TEMPERATURE bit set)
     double temperature = -273.0;  // in °C

@@ -16,6 +16,7 @@
 #include <QDebug>
 #include <QVector>
 #include <QGraphicsLineItem>
+#include <QGraphicsRectItem>
 #include <limits>
 #include <cmath>
 #include <algorithm>
@@ -28,6 +29,7 @@
 #include <QtCharts/QStackedBarSeries>
 #include <QtCharts/QBarSet>
 #include <QtCharts/QBarCategoryAxis>
+#include <QtCharts/QLineSeries>
 
 #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
 QT_CHARTS_USE_NAMESPACE
@@ -461,7 +463,7 @@ EnergyCategories EnergyHistoryBuilder::buildEnergyCategories(
 QValueAxis *EnergyHistoryBuilder::setupEnergyHistoryAxes(
     QChart *chart, QAbstractSeries *barSeries,
     const EnergyCategories &cats,
-    int grid, bool useKwh, double maxY)
+    int grid, bool useKwh, double minY, double maxY)
 {
     QBarCategoryAxis *axisX = new QBarCategoryAxis();
     axisX->append(cats.categories);
@@ -475,7 +477,7 @@ QValueAxis *EnergyHistoryBuilder::setupEnergyHistoryAxes(
     QValueAxis *axisY = new QValueAxis();
     axisY->setTitleText(useKwh ? i18n("kWh") : i18n("Wh"));
     axisY->setLabelFormat("%.1f");
-    applyAxisRange(axisY, roundAxisRange(0.0, maxY));
+    applyAxisRange(axisY, roundAxisRange(minY, maxY));
     chart->addAxis(axisY, Qt::AlignLeft);
     barSeries->attachAxis(axisY);
 
@@ -653,19 +655,21 @@ void EnergyHistoryBuilder::buildEnergyHistoryChart(const DeviceBasicStats &stats
 
     QList<double> barValues;
     barValues.reserve(cats.barIndices.size());
+    const bool devIsProducer = m_owner.m_device.isProducer;
     for (int idx : cats.barIndices) {
         double v = 0.0;
         if (idx < view.series->values.size()) {
             double raw = view.series->values.at(idx);
             if (!std::isnan(raw)) v = raw;
         }
-        barValues << v;
+        // Negate energy values for producer devices so bars extend downward.
+        barValues << (devIsProducer ? -v : v);
     }
 
     double rawTotal = 0.0;
     for (double v : barValues) rawTotal += v;
     double maxVal = 0.0;
-    for (double v : barValues) maxVal = qMax(maxVal, v);
+    for (double v : barValues) maxVal = qMax(maxVal, qAbs(v));
 
     if (rawTotal == 0.0) {
         QStringList labels;
@@ -675,7 +679,7 @@ void EnergyHistoryBuilder::buildEnergyHistoryChart(const DeviceBasicStats &stats
         return;
     }
 
-    const bool   useKwh = (view.grid != 900) && (rawTotal >= 1000.0);
+    const bool   useKwh = (view.grid != 900) && (qAbs(rawTotal) >= 1000.0);
     const double scale  = useKwh ? 0.001 : 1.0;
 
     const int lastBar = cats.categories.size() - 1;
@@ -699,7 +703,9 @@ void EnergyHistoryBuilder::buildEnergyHistoryChart(const DeviceBasicStats &stats
     QChart *chart = makeBaseChart(i18n("Energy History"));
     chart->addSeries(barSeries);
 
-    setupEnergyHistoryAxes(chart, barSeries, cats, view.grid, useKwh, maxVal * scale);
+    setupEnergyHistoryAxes(chart, barSeries, cats, view.grid, useKwh,
+                            devIsProducer ? -maxVal * scale : 0.0,
+                            devIsProducer ? 0.0 : maxVal * scale);
 
     QChartView *chartView = makeChartView(chart);
 
@@ -734,9 +740,15 @@ void EnergyHistoryBuilder::buildEnergyHistoryChart(const DeviceBasicStats &stats
     for (int i = 0; i < nViews; ++i)
         viewLabelStrings << i18n(views[i].label);
 
+    // For producers, rawTotal is already negative (bars were negated above).
+    // Format using the absolute value, then prepend exactly one "−" so the
+    // total sign matches the downward bars without doubling the minus.
+    const double displayTotal = qAbs(rawTotal);
     QString totalText = useKwh
-        ? QString("%1 kWh").arg(rawTotal / 1000.0, 0, 'f', 2)
-        : QString("%1 Wh").arg(rawTotal, 0, 'f', 1);
+        ? QString("%1 kWh").arg(displayTotal / 1000.0, 0, 'f', 2)
+        : QString("%1 Wh").arg(displayTotal, 0, 'f', 1);
+    if (devIsProducer)
+        totalText = QStringLiteral("−") + totalText;
 
     finalizeEnergyHistoryTab(chartView, viewLabelStrings, selectedIdx, totalText, view.grid);
 }
@@ -744,7 +756,7 @@ void EnergyHistoryBuilder::buildEnergyHistoryChart(const DeviceBasicStats &stats
 // ── Stacked energy history chart (group mode) ───────────────────────────────
 
 void EnergyHistoryBuilder::buildEnergyHistoryChartStacked(
-    const QList<QPair<QString, DeviceBasicStats>> &memberStats)
+    const QList<MemberHistoryEntry> &memberStats)
 {
     struct MemberSeriesSet {
         const StatSeries *s900     = nullptr;
@@ -757,7 +769,7 @@ void EnergyHistoryBuilder::buildEnergyHistoryChartStacked(
     QDateTime fetchTime;
 
     for (int m = 0; m < memberStats.size(); ++m) {
-        const DeviceBasicStats &s = memberStats.at(m).second;
+        const DeviceBasicStats &s = memberStats.at(m).stats;
         if (!fetchTime.isValid() && s.fetchTime.isValid())
             fetchTime = s.fetchTime;
         for (const StatSeries &ss : s.energy) {
@@ -780,17 +792,17 @@ void EnergyHistoryBuilder::buildEnergyHistoryChartStacked(
 
     if (!has900 && !has86400 && !has2678400) {
         QStringList reasons;
-        for (const auto &pair : memberStats) {
-            const QString &state = pair.second.energyStatsState;
+        for (const auto &entry : memberStats) {
+            const QString &state = entry.stats.energyStatsState;
             if (state.isEmpty())
                 continue;
             QString msg;
             if (state == QLatin1String("notConnected"))
-                msg = i18n("%1: device not connected", pair.first);
+                msg = i18n("%1: device not connected", entry.name);
             else if (state == QLatin1String("unknown"))
-                msg = i18n("%1: statistics not yet available", pair.first);
+                msg = i18n("%1: statistics not yet available", entry.name);
             else
-                msg = i18n("%1: %2", pair.first, state);
+                msg = i18n("%1: %2", entry.name, state);
             if (!reasons.contains(msg))
                 reasons.append(msg);
         }
@@ -850,6 +862,16 @@ void EnergyHistoryBuilder::buildEnergyHistoryChartStacked(
         view.grid, maxBars, fetchSecs, fetchTime);
 
     const int nMembers = memberStats.size();
+
+    // Net overlay and legend entry are only meaningful when members have mixed
+    // producer/consumer roles — otherwise all bars point the same direction and
+    // a "net" line carries no additional information.
+    bool hasProducer  = false;
+    bool hasConsumer  = false;
+    for (const MemberHistoryEntry &ms : memberStats) {
+        if (ms.isProducer) hasProducer = true; else hasConsumer = true;
+    }
+    const bool hasMixedProducers = hasProducer && hasConsumer;
     QVector<QList<double>> memberBarValues(nMembers);
 
     auto slotValue = [&](int memberIdx, int barIndex) -> double {
@@ -859,7 +881,9 @@ void EnergyHistoryBuilder::buildEnergyHistoryChartStacked(
                                                       : ms.s2678400;
         if (!ss || barIndex >= ss->values.size()) return 0.0;
         double raw = ss->values.at(barIndex);
-        return std::isnan(raw) ? 0.0 : raw;
+        if (std::isnan(raw)) return 0.0;
+        // Negate energy values for producer members.
+        return memberStats.at(memberIdx).isProducer ? -raw : raw;
     };
 
     for (int i = 0; i < cats.barIndices.size(); ++i) {
@@ -870,14 +894,18 @@ void EnergyHistoryBuilder::buildEnergyHistoryChartStacked(
 
     double grandTotal = 0.0;
     double maxStack   = 0.0;
+    double minStack   = 0.0;
     {
         const int nCats = cats.categories.size();
         for (int slot = 0; slot < nCats; ++slot) {
-            double slotSum = 0.0;
-            for (int m = 0; m < nMembers; ++m)
-                slotSum += memberBarValues[m].value(slot, 0.0);
-            grandTotal += slotSum;
-            maxStack    = qMax(maxStack, slotSum);
+            double posSum = 0.0, negSum = 0.0;
+            for (int m = 0; m < nMembers; ++m) {
+                double v = memberBarValues[m].value(slot, 0.0);
+                if (v >= 0.0) posSum += v; else negSum += v;
+            }
+            grandTotal += posSum + negSum;
+            maxStack    = qMax(maxStack, posSum);
+            minStack    = qMin(minStack, negSum);
         }
     }
 
@@ -889,7 +917,8 @@ void EnergyHistoryBuilder::buildEnergyHistoryChartStacked(
         return;
     }
 
-    const bool   useKwh = (view.grid != 900) && (grandTotal >= 1000.0);
+    const double absTotal = qAbs(grandTotal);
+    const bool   useKwh = (view.grid != 900) && (absTotal >= 1000.0);
     const double scale  = useKwh ? 0.001 : 1.0;
 
     const int lastBar     = cats.categories.size() - 1;
@@ -900,7 +929,7 @@ void EnergyHistoryBuilder::buildEnergyHistoryChartStacked(
     QVector<QBarSet *> barSets;
     barSets.reserve(nMembers);
     for (int m = 0; m < nMembers; ++m) {
-        const QString &memberName = memberStats.at(m).first;
+        const QString &memberName = memberStats.at(m).name;
         QBarSet *bs = new QBarSet(memberName);
         QColor c = kChartPalette[m % kChartPaletteSize];
         c.setAlpha(200);
@@ -921,16 +950,89 @@ void EnergyHistoryBuilder::buildEnergyHistoryChartStacked(
         barSets.append(bs);
     }
 
+    // Compute net values (signed sum across all members) for ghost bars + cap lines + tooltip.
+    const int nCats = cats.categories.size();
+    QList<double> netVals;
+    netVals.reserve(nCats);
+    for (int slot = 0; slot < nCats; ++slot) {
+        double net = 0.0;
+        for (int m = 0; m < nMembers; ++m)
+            net += memberBarValues[m].value(slot, 0.0);
+        netVals << net * scale;
+    }
+
     QChart *chart = makeBaseChart(i18n("Energy History"));
     chart->addSeries(barSeries);
     chart->legend()->show();
 
-    setupEnergyHistoryAxes(chart, barSeries, cats, view.grid, useKwh, maxStack * scale);
+    setupEnergyHistoryAxes(chart, barSeries, cats, view.grid, useKwh,
+                            minStack * scale, maxStack * scale);
 
     QChartView *chartView = makeChartView(chart);
 
+    // Net ghost bars + cap lines: only shown when members have mixed producer/consumer
+    // roles, i.e. some bars go up and some go down — the net line then carries meaning.
+    if (hasMixedProducers) {
+        auto ghostRects = std::make_shared<QVector<QGraphicsRectItem *>>();
+        auto capLines   = std::make_shared<QVector<QGraphicsLineItem *>>();
+        ghostRects->reserve(nCats);
+        capLines->reserve(nCats);
+        for (int i = 0; i < nCats; ++i) {
+            auto *rect = new QGraphicsRectItem(chart);
+            rect->setBrush(QBrush(QColor(0, 0, 0, 100)));
+            rect->setPen(Qt::NoPen);
+            rect->setZValue(9);   // behind stacked bars (~10) but above chart background
+            ghostRects->append(rect);
+
+            auto *line = new QGraphicsLineItem(chart);
+            QPen pen(QColor(0, 0, 0, 200));
+            pen.setWidth(2);
+            line->setPen(pen);
+            line->setZValue(12);  // above stacked bars and axis overlays (11)
+            capLines->append(line);
+        }
+
+        auto updateNetOverlay = [chart, barSeries, ghostRects, capLines, netVals, nCats]() {
+            if (nCats < 1) return;
+            const QRectF pa = chart->plotArea();
+
+            // Slot width in scene coords; bar occupies 80 % of that.
+            const double cx0 = chart->mapToPosition(QPointF(0, 0), barSeries).x();
+            const double cx1 = (nCats > 1)
+                ? chart->mapToPosition(QPointF(1, 0), barSeries).x()
+                : cx0 + pa.width();
+            const double halfBar = (cx1 - cx0) * 0.4;   // 80 % / 2
+
+            // Y coordinate of zero on the value axis
+            const double zeroY = chart->mapToPosition(QPointF(0, 0), barSeries).y();
+
+            for (int i = 0; i < nCats; ++i) {
+                const double net = netVals.value(i, 0.0);
+                const double cx  = chart->mapToPosition(QPointF(i, net), barSeries).x();
+                const double cy  = chart->mapToPosition(QPointF(i, net), barSeries).y();
+
+                // Ghost rect from zero to net value, clipped to plot area
+                const double rectTop    = qMin(cy, zeroY);
+                const double rectBottom = qMax(cy, zeroY);
+                ghostRects->at(i)->setRect(
+                    cx - halfBar,
+                    qMax(rectTop,    pa.top()),
+                    halfBar * 2.0,
+                    qMin(rectBottom, pa.bottom()) - qMax(rectTop, pa.top()));
+
+                // Cap line: clamp to bar pixel width minus 2px each side so it
+                // always sits strictly inside the bar edges at any zoom level.
+                const double halfCap = qMax(0.0, halfBar - 1.0);
+                capLines->at(i)->setLine(cx - halfCap, cy, cx + halfCap, cy);
+            }
+        };
+        updateNetOverlay();
+    QObject::connect(chart, &QChart::plotAreaChanged, chart,
+                     [updateNetOverlay](const QRectF &) { updateNetOverlay(); });
+    }
+
     for (int m = 0; m < nMembers; ++m) {
-        const QString memberName = memberStats.at(m).first;
+        const QString memberName = memberStats.at(m).name;
         QBarSet *bs              = barSets.at(m);
         const QList<double> &vals = memberBarValues[m];
         auto onBarHovered = [this, cats, vals, memberName, useKwh, chartView]
@@ -970,6 +1072,23 @@ void EnergyHistoryBuilder::buildEnergyHistoryChartStacked(
     QString totalText = useKwh
         ? QString("%1 kWh").arg(grandTotal / 1000.0, 0, 'f', 2)
         : QString("%1 Wh").arg(grandTotal, 0, 'f', 1);
+
+    // ── Net legend entry ─────────────────────────────────────────────────────
+    // Only shown when members have mixed producer/consumer roles (same condition
+    // as the ghost-bar overlay above).  An empty QLineSeries registers a legend
+    // marker without rendering any visible line (no data points).
+    if (hasMixedProducers) {
+        QLineSeries *netLegend = new QLineSeries();
+        netLegend->setName(i18n("Net"));
+        QPen netPen(QColor(0, 0, 0, 200));
+        netPen.setWidth(2);
+        netLegend->setPen(netPen);
+        chart->addSeries(netLegend);
+        // Attach to axes so Qt Charts accepts the series without warnings;
+        // zero data points means nothing is rendered.
+        for (auto *ax : chart->axes())
+            netLegend->attachAxis(ax);
+    }
 
     finalizeEnergyHistoryTab(chartView, viewLabelStrings, selectedIdx, totalText, view.grid);
 }

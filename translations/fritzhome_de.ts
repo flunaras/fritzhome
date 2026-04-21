@@ -897,5 +897,31 @@ Daten werden angezeigt, sobald sie von der Fritz!Box verfügbar sind.</translati
 %1</translation>
      </message>
 
+     <!-- ── Producer / consumer ───────────────────────────────────────────── -->
+     <message>
+         <source>Power producer</source>
+         <translation>Stromerzeuger</translation>
+     </message>
+     <message>
+         <source>This device is a power producer (negates power/energy values in charts)</source>
+         <translation>Dieses Gerät ist ein Stromerzeuger (Leistungs- und Energiewerte werden in Diagrammen negiert)</translation>
+     </message>
+     <message>
+         <source>This device is a power producer (negate power chart)</source>
+         <translation>Dieses Gerät ist ein Stromerzeuger (Leistungsdiagramm negieren)</translation>
+     </message>
+     <message>
+         <source>Total Energy Produced</source>
+         <translation>Gesamtenergieerzeugung</translation>
+     </message>
+     <message>
+         <source>Net Energy (Group)</source>
+         <translation>Nettenergie (Gruppe)</translation>
+     </message>
+     <message>
+         <source>Net</source>
+         <translation>Netto</translation>
+     </message>
+
  </context>
  </TS>

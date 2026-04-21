@@ -4,6 +4,7 @@
 #include <QLabel>
 #include <QToolButton>
 #include <QGroupBox>
+#include <QCheckBox>
 
 class SwitchWidget : public DeviceWidget
 {
@@ -21,6 +22,7 @@ private:
     QToolButton *m_onBtn;
     QToolButton *m_offBtn;
     QToolButton *m_toggleBtn;
+    QCheckBox   *m_producerCheckBox = nullptr; ///< "This device is a power producer" — only shown for energy-capable devices
 
     FritzDeviceList m_members; // switch-capable group members; empty for single devices
 };

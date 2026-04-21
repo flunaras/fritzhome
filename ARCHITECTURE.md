@@ -441,10 +441,10 @@ Determines panel index by device capability priority (same order as group bucket
 |-----------------|---------------------|-----------------------------------------|-------------------|
 | Temperature (single device) | QLineSeries | `dev.temperatureHistory` (poll-rolling) | Yes |
 | Temperature (group) | QLineSeries × N members | `member.temperatureHistory` per temp-capable member (poll-rolling) | Yes |
-| Power           | QAreaSeries (single) or N×QAreaSeries layers (group ≥2 energy members) | `dev.powerHistory` / `member.powerHistory` (poll-rolling) | Yes |
+| Power           | QAreaSeries (single) or N×QAreaSeries layers (group ≥2 energy members) + QLineSeries net overlay (group only) | `dev.powerHistory` / `member.powerHistory` (poll-rolling) | Yes |
 | Humidity        | QLineSeries          | `dev.humidityHistory` (poll-rolling)    | No          |
 | Energy          | Static labels + optional QPieSeries (groups only) | `dev.energyStats` (live); per-member `energyStats.energy` for pie | No          |
-| Energy History  | QBarSeries (single) or QStackedBarSeries (group) — rebuilt on resolution change | `DeviceBasicStats` per member from API | No          |
+| Energy History  | QBarSeries (single) or QStackedBarSeries (group) + QGraphicsRectItem ghost bars + QGraphicsLineItem cap lines (group only) — rebuilt on resolution change | `DeviceBasicStats` per member from API | No          |
 
 Additional UI: For group devices the Energy tab shows a per-group
 "Member Energy Distribution" pie chart (`QPieSeries` in a `QChartView`) summarising
@@ -522,6 +522,31 @@ recreates the combo with items and signal wiring from scratch.
   placeholder style for views with no series data.
 - **Animations:** disabled for all energy history views (`QChart::NoAnimation`, the default
   from `makeBaseChart`). The "grow from zero" effect on bar rebuilds is distracting.
+
+### Producer / consumer device classification
+
+Individual energy-capable devices can be marked as **power producers** (e.g. solar panels)
+via the "Power producer" checkbox in `SwitchWidget` (top-right of the control panel) or
+`EnergyWidget`. The flag is stored as `FritzDevice::isProducer` and persisted to `QSettings`
+under `devices/<ain>/isProducer`. Groups never have a producer flag — each member carries its own.
+
+**Effect on charts and views:**
+
+- **Tree view** (`DeviceModel::ColPower`): power value is negated for producer devices; tooltip reflects the negated sign.
+- **Rolling power chart** (single device): values negated; area extends below zero.
+- **Rolling power chart** (group, stacked): consumer bands stack upward from zero; producer bands stack downward from zero independently, so they never cross. A black `QLineSeries` ("Net") is drawn on top of all bands **only when members have mixed producer/consumer roles** — showing the signed sum per timestamp (consumers positive, producers negative), updated on every rolling poll.
+- **Energy history chart** (single device): bar values negated; Y-axis range flipped to `[−maxVal, 0]`; total label shows the absolute value prefixed with "−" (e.g. `−1166.0 Wh`) — `qAbs(rawTotal)` is formatted first so the sign is never doubled.
+- **Energy history chart** (group, stacked): per-member values negated for producers; `minStack`/`maxStack` track the negative/positive extremes for the Y-axis range. A **net overlay** and legend entry are shown **only when members have mixed producer/consumer roles** (`hasMixedProducers = hasProducer && hasConsumer`):
+  - `QGraphicsRectItem` (zValue 9, behind stacked bars at ~10): semi-transparent black fill from zero to the net value, matching bar width exactly (`halfBar = slotWidth × 0.4`).
+  - `QGraphicsLineItem` (zValue 12, above everything): 2 px black cap line at the net value, width `halfBar − 1 px` to stay strictly inside the bar edges at any zoom level.
+  - An empty `QLineSeries` named "Net" (black 2 px pen, no data points) is added to the chart and attached to its axes solely to register a **legend marker** in the Qt Charts built-in legend. The ghost-bar overlay provides the actual visual; the series renders nothing.
+- **Energy gauge** (single device): power label is negated (negative = produced); kWh label shows the **absolute** value (positive number) under the heading "Total Energy Produced" / "Total Energy Consumed" — the heading already communicates direction. For groups: net signed energy/power computed from members.
+- **Pie chart** (group energy tab): `QPieSeries` requires positive values — absolute magnitude is used for slice sizing; the signed value is stored as a `QVariant` property `"signedEnergy"` on each slice and used for label rendering so negative (producer) shares display correctly.
+
+**Immediate chart refresh on toggle:** `MainWindow::setDeviceProducerStatus` calls
+`ChartWidget::updateForDeviceProducerStatusChange` which rebuilds the Energy gauge tab
+and Energy History tab in-place (without a full device switch) so the user sees the
+effect immediately without waiting for the next poll.
 - **No-op refresh guard:** `updateEnergyStats` and `updateGroupEnergyStats` compare the
   incoming `StatSeries::values` list for the currently displayed grid against the cached
   copy. If the values are identical the expensive remove-rebuild cycle is skipped; only

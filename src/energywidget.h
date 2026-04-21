@@ -2,6 +2,7 @@
 
 #include "devicewidget.h"
 #include <QLabel>
+#include <QCheckBox>
 
 class EnergyWidget : public DeviceWidget
 {
@@ -11,7 +12,8 @@ public:
     void updateDevice(const FritzDevice &device) override;
 
 private:
-    QLabel *m_powerLabel;
-    QLabel *m_energyLabel;
-    QLabel *m_voltageLabel;
+    QLabel    *m_powerLabel;
+    QLabel    *m_energyLabel;
+    QLabel    *m_voltageLabel;
+    QCheckBox *m_producerCheckBox; ///< "This device is a power producer"
 };
