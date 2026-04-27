@@ -18,6 +18,7 @@ class FritzApi;
 class DeviceModel;
 class DeviceWidget;
 class ChartWidget;
+class LocalGroupManager;
 class QTreeView;
 class QStackedWidget;
 class QSplitter;
@@ -70,10 +71,12 @@ private slots:
     void onNetworkError(const QString &error);
     void onCommandSuccess(const QString &ain, const QString &cmd);
     void onCommandFailed(const QString &ain, const QString &error);
+    void onLocalGroupsChanged();
 
     void actionConnect();
     void actionRefresh();
     void actionSettings();
+    void actionManageLocalGroups();
 
 private:
     void setupActions();
@@ -112,9 +115,11 @@ private:
     void synthesizeGroupSwitchState(FritzDevice &dev, DeviceWidget *dw) const;
 
     // Core objects
-    FritzApi    *m_api    = nullptr;
-    DeviceModel *m_model  = nullptr;
-    int          m_pollingInterval = 10;
+    FritzApi          *m_api                = nullptr;
+    DeviceModel       *m_model              = nullptr;
+    LocalGroupManager *m_localGroupManager  = nullptr;
+    int                m_pollingInterval    = 10;
+    FritzDeviceList    m_lastFritzDevices;  ///< last device list for local group synthesis
 
     // UI
     QSplitter      *m_splitter       = nullptr;

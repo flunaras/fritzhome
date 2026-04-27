@@ -22,8 +22,10 @@ Communicates directly with the Fritz!Box router over the local network using the
   | Humidity sensors | Relative humidity % |
   | Door/window alarm sensors | Triggered state, last alert timestamp |
   | Fritz!Box device groups | Grouped display in tree; stacked per-member power chart; multi-line per-member temperature chart; per-member energy pie chart |
+  | **Local groups** | User-defined groups that combine any mix of Fritz!Box devices into a single tree entry — managed via **Tools → Manage Local Groups…**; support the same stacked energy history, stacked power chart, multi-line temperature chart, and per-member pie chart as Fritz!Box hardware groups |
 
 - **Producer/consumer classification** — individual energy-capable devices can be marked as power producers (e.g. solar panels) via a checkbox in their control panel. Producer values are negated throughout: power and energy charts show production as negative values, the tree view negates the displayed wattage, and group charts separate consumer bars (stacking upward) from producer bars (stacking downward). Group views additionally overlay a **net effective power/energy indicator**: a black line on the rolling power chart and a semi-transparent ghost bar with a cap line on the energy history chart, both showing the signed sum (consumption minus production).
+- **"Partial" availability state** — Fritz!Box device groups (and local groups) where only some members are online are shown as **Partial** in the Availability column instead of Online/Offline, giving an at-a-glance indication of a partially available group.
 - **Live charts** (Temperature, Power, Humidity, Energy gauge, Energy history with configurable resolution; bar chart shows hover tooltips with date/value, and the most recent bar is visually dimmed to indicate an incomplete accumulation period; group devices show a **stacked energy history bar chart** with one colour-coded bar segment per member device, a **stacked per-member power chart**, and a **multi-line temperature chart** with one line per temperature-capable member). For groups the Energy tab also shows a **per-member pie chart** summarising each member's share of total energy; slice labels show both absolute and percentage values, with overlap-aware visibility that hides labels of small neighbouring slices; hovering a slice explodes it and shows a tooltip with its details.
 - **Configurable polling interval** (2 – 300 s), shown below the device tree
 - **Efficient network usage** — response caching (TTL-based) and request deduplication minimise traffic to the Fritz!Box
@@ -198,6 +200,8 @@ src/
 ├── humiditysensorwidget.{h,cpp} Humidity sensor panel
 ├── alarmwidget.{h,cpp}         Alarm sensor panel
 ├── chartwidget.{h,cpp}         Live charts (Qt Charts) — temperature, power, humidity, energy
+├── localgroupmanager.{h,cpp}   Local group persistence — stores user-defined device groups in QSettings
+├── localgroupdialog.{h,cpp}    "Manage Local Groups" dialog — create, rename, delete groups, add/remove members
 ├── secretstore.{h,cpp}         Cross-backend password storage (KWallet / libsecret / QSettings)
 └── i18n_shim.h                 i18n shim — KLocalizedString (HAVE_KF=1) or QCoreApplication::translate (HAVE_KF=0)
 

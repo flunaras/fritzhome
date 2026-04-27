@@ -40,6 +40,8 @@
 #include "loginwindow.h"
 #include "chartwidget.h"
 #include "secretstore.h"
+#include "localgroupmanager.h"
+#include "localgroupdialog.h"
 
 // Device-specific widgets
 #include "switchwidget.h"
@@ -50,6 +52,10 @@
 #include "colorwidget.h"
 #include "humiditysensorwidget.h"
 #include "alarmwidget.h"
+
+// QSettings key for the per-device producer flag (must match devicemodel.cpp).
+// Full path written: "devices/<ain>/isProducer"
+static const char *kSettingsKeyIsProducer = "isProducer";
 
 // Indices into m_controlStack
 enum PanelIndex {
@@ -81,6 +87,7 @@ MainWindow::MainWindow(QWidget *parent)
 #endif
     , m_api(new FritzApi(this))
     , m_model(new DeviceModel(this))
+    , m_localGroupManager(new LocalGroupManager(this))
 {
     setWindowTitle(i18n("Fritz!Box Smart Home"));
     setWindowIcon(QIcon::fromTheme(QStringLiteral("fritzhome"),
@@ -109,6 +116,10 @@ MainWindow::MainWindow(QWidget *parent)
     setupActions();
     wireSignals();
     restoreSettings();
+
+    // Show local groups immediately even before Fritz!Box connection
+    if (!m_localGroupManager->groups().isEmpty())
+        m_model->setLocalGroups(m_localGroupManager->groups(), {});
 }
 
 MainWindow::~MainWindow() = default;
@@ -324,6 +335,10 @@ void MainWindow::wireSignals()
                  if (m_api->isLoggedIn())
                      m_api->startPolling(seconds * 1000);
              });
+
+    // Local group manager: rebuild model whenever groups change
+    connect(m_localGroupManager, &LocalGroupManager::groupsChanged,
+            this, &MainWindow::onLocalGroupsChanged);
 }
 
 void MainWindow::restoreSettings()
@@ -473,9 +488,16 @@ void MainWindow::setupActions()
 #endif
     connect(quitAction, &QAction::triggered, this, &MainWindow::close);
 
+    // Tools > Manage Local Groups
+    QAction *localGroupsAction = new QAction(
+        QIcon::fromTheme(QStringLiteral("folder-new")),
+        i18n("Manage &Local Groups…"), this);
+    connect(localGroupsAction, &QAction::triggered, this, &MainWindow::actionManageLocalGroups);
+
 #if HAVE_KF
     actionCollection()->addAction(QStringLiteral("file_connect"), connectAction);
     actionCollection()->addAction(QStringLiteral("file_refresh"), refreshAction);
+    actionCollection()->addAction(QStringLiteral("tools_localgroups"), localGroupsAction);
     // Assign shortcuts via KActionCollection so KXmlGui can save/restore them.
     // Using QAction::setShortcut() directly triggers a kf.xmlgui warning.
     actionCollection()->setDefaultShortcut(connectAction, QKeySequence(Qt::CTRL | Qt::Key_L));
@@ -502,6 +524,9 @@ void MainWindow::setupActions()
     fileMenu->addAction(refreshAction);
     fileMenu->addSeparator();
     fileMenu->addAction(quitAction);
+
+    QMenu *toolsMenu = menuBar()->addMenu(i18n("&Tools"));
+    toolsMenu->addAction(localGroupsAction);
 #endif
 }
 
@@ -661,9 +686,15 @@ void MainWindow::reselectDevice(const QString &ain)
 
             // Poll tick for the same device: update series in-place without
             // rebuilding charts (avoids flicker and unnecessary work).
+            // Exception: if only the Info placeholder tab is shown (e.g. the
+            // device was clicked before connection and had no capabilities yet),
+            // do a full rebuild now that it may have real chart data.
             const FritzDeviceList memberDevs = dev.isGroup()
                 ? collectMemberDevices(dev) : FritzDeviceList();
-            m_chartWidget->updateRollingCharts(dev, memberDevs);
+            if (m_chartWidget->hasOnlyInfoTab())
+                m_chartWidget->updateDevice(dev, memberDevs);
+            else
+                m_chartWidget->updateRollingCharts(dev, memberDevs);
 
             fetchEnergyStatsIfDue(dev, memberDevs);
             return;
@@ -734,9 +765,13 @@ void MainWindow::onDeviceListUpdated(const FritzDeviceList &devices)
     const QSet<QString> expandedGroups = saveTreeState();
     const bool firstLoad = expandedGroups.isEmpty() && m_model->rowCount() == 0;
 
+    m_lastFritzDevices = devices;
     m_model->updateDevices(devices);
+    // Apply local groups after Fritz!Box devices so synthesized entries have
+    // access to the full device list for capability/state computation.
+    m_model->setLocalGroups(m_localGroupManager->groups(), devices);
     // Re-apply saved producer flags after every model reset (updateDevices
-    // rebuilds from scratch, losing any runtime-only isProducer state).
+    // and setLocalGroups rebuild from scratch, losing any runtime-only isProducer state).
     loadProducerSettings();
 
     initColumnSizes(devices);
@@ -820,6 +855,42 @@ void MainWindow::actionSettings()
     showLoginDialog();
 }
 
+void MainWindow::actionManageLocalGroups()
+{
+    LocalGroupDialog dlg(m_localGroupManager, m_lastFritzDevices, this);
+    dlg.exec();
+    // groupsChanged() from manager already updates the model via wireSignals()
+}
+
+void MainWindow::onLocalGroupsChanged()
+{
+    // Rebuild the Local Groups bucket after any add/rename/delete/member change.
+    const QString previousAin     = m_selectedAin;
+    const QSet<QString> expanded  = saveTreeState();
+    m_model->setLocalGroups(m_localGroupManager->groups(), m_lastFritzDevices);
+    // Re-apply producer flags: setLocalGroups() rebuilds from scratch so all
+    // isProducer fields are reset to false.  collectMemberDevices() reads from
+    // the model, so flags must be restored before we rebuild the chart.
+    loadProducerSettings();
+    restoreTreeState(expanded, false);
+    if (previousAin.isEmpty())
+        return;
+    reselectDevice(previousAin);
+    // reselectDevice does a rolling in-place chart update; when group membership
+    // changes the chart must be fully rebuilt to reflect the new composition.
+    FritzDevice dev = m_model->deviceByAin(previousAin);
+    if (dev.ain.isEmpty())
+        dev = m_model->deviceById(previousAin);
+    if (dev.ain.isEmpty() || !dev.isGroup())
+        return;
+    const FritzDeviceList memberDevs = collectMemberDevices(dev);
+    m_chartWidget->updateDevice(dev, memberDevs);
+    if (dev.hasEnergyMeter()) {
+        fetchGroupOrDeviceStats(dev, memberDevs);
+        m_lastStatsFetch = QDateTime::currentDateTime();
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Device selection
 // ─────────────────────────────────────────────────────────────────────────────
@@ -828,14 +899,34 @@ FritzDeviceList MainWindow::collectMemberDevices(const FritzDevice &groupDev) co
 {
     FritzDeviceList members;
     for (const QString &memberId : groupDev.memberAins) {
-        // memberAins contains device AIns resolved from the REST API's
-        // memberUnitUids.  Look up by id; fall back to AIN lookup for
-        // robustness.
-        FritzDevice m = m_model->deviceById(memberId);
-        if (m.ain.isEmpty())
-            m = m_model->deviceByAin(memberId);
-        if (!m.ain.isEmpty())
-            members.append(m);
+        if (memberId.startsWith(QStringLiteral("local:"))) {
+            // Nested local group: look up as a synthetic FritzDevice by AIN
+            FritzDevice m = m_model->deviceByAin(memberId);
+            if (!m.ain.isEmpty())
+                members.append(m);
+        } else {
+            // memberAins contains device AIns resolved from the REST API's
+            // memberUnitUids.  Look up by id; fall back to AIN lookup for
+            // robustness.
+            FritzDevice m = m_model->deviceById(memberId);
+            if (m.ain.isEmpty())
+                m = m_model->deviceByAin(memberId);
+            if (m.ain.isEmpty())
+                continue;
+            if (!m.isGroup()) {
+                members.append(m);
+            } else {
+                // Member is a native Fritz!Box group — expand to its leaf
+                // devices so chart tabs and energy history work correctly.
+                // (Stale persisted data may reference native groups even
+                // though the dialog now prevents selecting them.)
+                for (const QString &leafAin : m.memberAins) {
+                    FritzDevice leaf = m_model->deviceByAin(leafAin);
+                    if (!leaf.ain.isEmpty() && !leaf.isGroup())
+                        members.append(leaf);
+                }
+            }
+        }
     }
     return members;
 }
@@ -1002,7 +1093,8 @@ void MainWindow::setDeviceProducerStatus(const QString &ain, bool isProducer)
 {
     // Persist to QSettings
     QSettings s;
-    s.setValue(QStringLiteral("devices/%1/isProducer").arg(ain), isProducer);
+    s.setValue(QStringLiteral("devices/") + ain + QLatin1Char('/') +
+               QString::fromLatin1(kSettingsKeyIsProducer), isProducer);
 
     // Update model so future device list updates and chart rebuilds see the correct flag
     m_model->updateDeviceProducerStatus(ain, isProducer);
@@ -1022,7 +1114,9 @@ void MainWindow::loadProducerSettings()
     s.beginGroup(QStringLiteral("devices"));
     const QStringList ains = s.childGroups();
     for (const QString &ain : ains) {
-        bool isProducer = s.value(QStringLiteral("%1/isProducer").arg(ain), false).toBool();
+        const bool isProducer = s.value(
+            ain + QLatin1Char('/') + QString::fromLatin1(kSettingsKeyIsProducer),
+            false).toBool();
         if (isProducer)
             m_model->updateDeviceProducerStatus(ain, true);
     }

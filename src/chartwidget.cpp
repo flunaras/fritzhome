@@ -241,6 +241,12 @@ void ChartWidget::buildChartsForDevice(const FritzDevice &device,
     }
 }
 
+bool ChartWidget::hasOnlyInfoTab() const
+{
+    return m_tabs->count() == 1
+        && plainTabText(m_tabs->tabText(0)) == i18n("Info");
+}
+
 void ChartWidget::restoreTabAndApplyWindow(const QString &activeTabText)
 {
     {

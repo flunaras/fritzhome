@@ -149,6 +149,8 @@ set(fritzhome_SRCS
     src/energygaugebuilder.cpp
     src/energyhistorybuilder.cpp
     src/secretstore.cpp
+    src/localgroupmanager.cpp
+    src/localgroupdialog.cpp
     src/resources.qrc
 )
 
@@ -174,6 +176,8 @@ set(fritzhome_HDRS
     src/energyhistorybuilder.h
     src/fritzdevice.h
     src/secretstore.h
+    src/localgroupmanager.h
+    src/localgroupdialog.h
 )
 
 add_executable(fritzhome

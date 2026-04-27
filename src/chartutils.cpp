@@ -39,14 +39,28 @@ const char * const kWindowLabels[] = {
 };
 
 const QColor kChartPalette[] = {
-    QColor(0,   120, 215),
-    QColor(220, 80,  0  ),
-    QColor(0,   153, 76 ),
-    QColor(180, 0,   180),
-    QColor(200, 160, 0  ),
-    QColor(0,   180, 200),
-    QColor(220, 50,  50 ),
-    QColor(80,  80,  200),
+    // First 8 — original high-contrast set
+    QColor(  0, 120, 215),   // Blue
+    QColor(220,  80,   0),   // Orange
+    QColor(  0, 153,  76),   // Green
+    QColor(180,   0, 180),   // Purple
+    QColor(200, 160,   0),   // Yellow-gold
+    QColor(  0, 180, 200),   // Cyan
+    QColor(220,  50,  50),   // Red
+    QColor( 80,  80, 200),   // Indigo
+    // Next 12 — additional perceptually distinct colours
+    QColor(  0, 180, 120),   // Teal
+    QColor(200,  80, 160),   // Pink
+    QColor(140, 100,   0),   // Brown
+    QColor( 90, 180,   0),   // Lime
+    QColor(  0,  80, 160),   // Navy
+    QColor(220, 140,   0),   // Amber
+    QColor(160,   0,  80),   // Crimson
+    QColor( 60, 160, 220),   // Sky blue
+    QColor(120, 200,  80),   // Light green
+    QColor(200,  60, 220),   // Violet
+    QColor(160, 120,   0),   // Olive
+    QColor(  0, 140, 160),   // Dark cyan
 };
 const int kChartPaletteSize = static_cast<int>(std::size(kChartPalette));
 

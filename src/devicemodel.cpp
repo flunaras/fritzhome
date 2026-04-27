@@ -1,9 +1,16 @@
 #include "devicemodel.h"
+#include "localgroupmanager.h"
 #include <QColor>
 #include <QFont>
 #include <QIcon>
+#include <QSettings>
 #include <algorithm>
 #include "i18n_shim.h"
+
+// QSettings key for the per-device producer flag (shared with mainwindow.cpp
+// via this constant; both sites must use the same key to read/write correctly).
+// Full path: "devices/<ain>/isProducer"
+static const char *kSettingsKeyIsProducer = "isProducer";
 
 // ---------------------------------------------------------------------------
 // Helpers: primary type label and icon for a device (drives bucket assignment)
@@ -80,7 +87,161 @@ DeviceModel::DeviceModel(QObject *parent)
 void DeviceModel::updateDevices(const FritzDeviceList &devices)
 {
     beginResetModel();
+    m_lastFritzDevices = devices;
     rebuildGroups(devices);
+    endResetModel();
+}
+
+// ---------------------------------------------------------------------------
+// Local groups: synthesise fake FritzDevice entries and add them to their own
+// "Local Groups" bucket at the bottom of the tree.
+// ---------------------------------------------------------------------------
+
+/// Recursively collect member FritzDevices for a local group (handles nested
+/// local groups up to reasonable depth to avoid infinite loops).
+static FritzDeviceList collectLocalGroupMembers(
+    const LocalGroup &lg,
+    const FritzDeviceList &allFritz,
+    const LocalGroupList &allLocal,
+    int depth = 0)
+{
+    if (depth > 8)
+        return {};   // safety guard against circular references
+
+    FritzDeviceList result;
+    for (const QString &ain : lg.memberAins) {
+        if (ain.startsWith(QStringLiteral("local:"))) {
+            const QString memberId = ain.mid(6);
+            for (const LocalGroup &sub : allLocal) {
+                if (sub.id == memberId) {
+                    result += collectLocalGroupMembers(sub, allFritz, allLocal, depth + 1);
+                    break;
+                }
+            }
+        } else {
+            for (const FritzDevice &dev : allFritz) {
+                if (dev.ain != ain)
+                    continue;
+                if (!dev.isGroup()) {
+                    result.append(dev);
+                } else {
+                    // Member is a native Fritz!Box group — expand to its leaf
+                    // devices so capability union and chart data work correctly.
+                    // (Stale persisted data may reference native groups even
+                    // though the dialog now prevents selecting them.)
+                    for (const QString &leafAin : dev.memberAins) {
+                        for (const FritzDevice &leaf : allFritz) {
+                            if (leaf.ain == leafAin && !leaf.isGroup()) {
+                                result.append(leaf);
+                                break;
+                            }
+                        }
+                    }
+                }
+                break;
+            }
+        }
+    }
+    return result;
+}
+
+/// Accumulate a single member's energy contribution into @p target.
+/// @p s must already be opened to the "devices" QSettings group.
+static void accumulateMemberEnergy(FritzDevice &target,
+                                   const FritzDevice &member,
+                                   QSettings &s)
+{
+    if (!member.hasEnergyMeter() || !member.energyStats.valid)
+        return;
+    // Read producer flag from QSettings — model's isProducer is a runtime-only
+    // field reset on every rebuild, so it cannot be trusted here.
+    // QSettings is the authoritative source.
+    const bool producer = s.value(
+        member.ain + QLatin1Char('/') + QString::fromLatin1(kSettingsKeyIsProducer),
+        false).toBool();
+    target.energyStats.valid   = true;
+    target.energyStats.power  += producer ? -member.energyStats.power : member.energyStats.power;
+    target.energyStats.energy += member.energyStats.energy;
+}
+
+/// Build a synthetic FritzDevice that represents a local group.
+/// @p s must already be opened to the "devices" QSettings group.
+static FritzDevice synthesizeLocalGroupDevice(
+    const LocalGroup &lg,
+    const FritzDeviceList &allFritz,
+    const LocalGroupList &allLocal,
+    QSettings &s)
+{
+    FritzDevice gdev;
+    gdev.ain        = QStringLiteral("local:") + lg.id;
+    gdev.identifier = gdev.ain;
+    gdev.id         = lg.id;
+    gdev.unitUID    = gdev.ain;
+    gdev.name       = lg.name;
+    gdev.group      = true;
+    gdev.present    = true;
+    gdev.memberAins = lg.memberAins;
+
+    // Capability union of all members
+    const FritzDeviceList members = collectLocalGroupMembers(lg, allFritz, allLocal);
+    int onlineCount  = 0;
+    int offlineCount = 0;
+    for (const FritzDevice &m : members) {
+        m.present ? ++onlineCount : ++offlineCount;
+        gdev.functionBitmask |= m.functionBitmask;
+        if (m.hasSwitch() && m.switchStats.valid) {
+            gdev.switchStats.valid = true;
+            if (m.switchStats.on)
+                gdev.switchStats.on = true;
+        }
+        accumulateMemberEnergy(gdev, m, s);
+    }
+    // Derive presence from member counts:
+    //   all online  → present=true,  partiallyPresent=false
+    //   mixed       → present=true,  partiallyPresent=true   ("Partial")
+    //   all offline → present=false, partiallyPresent=false
+    if (onlineCount == 0) {
+        gdev.present          = false;
+        gdev.partiallyPresent = false;
+    } else if (offlineCount == 0) {
+        gdev.present          = true;
+        gdev.partiallyPresent = false;
+    } else {
+        gdev.present          = true;
+        gdev.partiallyPresent = true;
+    }
+    return gdev;
+}
+
+void DeviceModel::setLocalGroups(const LocalGroupList &localGroups,
+                                  const FritzDeviceList &allFritzDevices)
+{
+    beginResetModel();
+
+    // Remove any existing "Local Groups" bucket and rebuild from scratch
+    m_localGroups = localGroups;
+    rebuildGroups(m_lastFritzDevices);
+
+    if (!localGroups.isEmpty()) {
+        // Open QSettings once for all synthesize calls — avoids repeated
+        // open/close for every group when iterating the bucket.
+        QSettings s;
+        s.beginGroup(QStringLiteral("devices"));
+        Group localBucket;
+        localBucket.label    = i18n("Local Groups");
+        localBucket.iconName = QStringLiteral(":/icons/device-group.svg");
+        for (const LocalGroup &lg : localGroups) {
+            localBucket.devices.append(
+                synthesizeLocalGroupDevice(lg, allFritzDevices, localGroups, s));
+        }
+        s.endGroup();
+        std::sort(localBucket.devices.begin(), localBucket.devices.end(),
+                  [](const FritzDevice &a, const FritzDevice &b) {
+                      return a.name.toLower() < b.name.toLower();
+                  });
+        m_groups.append(localBucket);
+    }
+
     endResetModel();
 }
 
@@ -229,13 +390,17 @@ QVariant DeviceModel::data(const QModelIndex &index, int role) const
                 return QString("%1 W").arg(power, 0, 'f', 1);
             }
             return QString("-");
-        case ColPresent: return dev.present ? i18n("Online") : i18n("Offline");
+        case ColPresent:
+            if (dev.partiallyPresent) return i18n("Partial");
+            return dev.present ? i18n("Online") : i18n("Offline");
         }
     }
 
     if (role == Qt::ForegroundRole) {
-        if (index.column() == ColPresent)
+        if (index.column() == ColPresent) {
+            if (dev.partiallyPresent) return QColor(Qt::darkYellow);
             return dev.present ? QColor(Qt::darkGreen) : QColor(Qt::red);
+        }
         if (index.column() == ColStatus && dev.hasAlarm() && dev.alarmStats.triggered)
             return QColor(Qt::red);
     }
@@ -317,6 +482,7 @@ void DeviceModel::updateDeviceProducerStatus(const QString &ain, bool isProducer
 QString DeviceModel::deviceStatusString(const FritzDevice &dev) const
 {
     if (!dev.present) return i18n("Offline");
+    if (dev.partiallyPresent) return i18n("Partial");
     if (dev.hasAlarm() && dev.alarmStats.triggered) return i18n("ALARM");
     if (dev.hasSwitch()) return dev.switchStats.on ? i18n("On") : i18n("Off");
     if (dev.hasThermostat()) {

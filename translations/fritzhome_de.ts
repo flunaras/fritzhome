@@ -897,6 +897,68 @@ Daten werden angezeigt, sobald sie von der Fritz!Box verfügbar sind.</translati
 %1</translation>
      </message>
 
+     <!-- ── Local groups ──────────────────────────────────────────────────── -->
+     <message>
+         <source>Local Groups</source>
+         <translation>Lokale Gruppen</translation>
+     </message>
+     <message>
+         <source>Manage &amp;Local Groups…</source>
+         <translation>Lokale Gruppen &amp;verwalten …</translation>
+     </message>
+     <message>
+         <source>Manage Local Groups</source>
+         <translation>Lokale Gruppen verwalten</translation>
+     </message>
+     <message>
+         <source>&amp;Tools</source>
+         <translation>&amp;Extras</translation>
+     </message>
+     <message>
+         <source>Create a new local group</source>
+         <translation>Neue lokale Gruppe erstellen</translation>
+     </message>
+     <message>
+         <source>Delete the selected group</source>
+         <translation>Ausgewählte Gruppe löschen</translation>
+     </message>
+     <message>
+         <source>Select a group on the left to edit it,
+or click + to create a new one.</source>
+         <translation>Wählen Sie links eine Gruppe aus, um sie zu bearbeiten,
+oder klicken Sie auf +, um eine neue zu erstellen.</translation>
+     </message>
+     <message>
+         <source>Group name</source>
+         <translation>Gruppenname</translation>
+     </message>
+     <message>
+         <source>Members:</source>
+         <translation>Mitglieder:</translation>
+     </message>
+     <message>
+         <source>local group</source>
+         <translation>lokale Gruppe</translation>
+     </message>
+     <message>
+         <source>Delete Group</source>
+         <translation>Gruppe löschen</translation>
+     </message>
+     <message>
+         <source>Delete the group &quot;%1&quot;? This cannot be undone.</source>
+         <translation>Gruppe &quot;%1&quot; löschen? Dies kann nicht rückgängig gemacht werden.</translation>
+     </message>
+     <message>
+         <source>New Group</source>
+         <translation>Neue Gruppe</translation>
+     </message>
+
+     <!-- ── Availability states ────────────────────────────────────────────── -->
+     <message>
+         <source>Partial</source>
+         <translation>Teilweise</translation>
+     </message>
+
      <!-- ── Producer / consumer ───────────────────────────────────────────── -->
      <message>
          <source>Power producer</source>

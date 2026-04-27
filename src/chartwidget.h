@@ -93,6 +93,12 @@ public:
      /// 0 if no energy history tab has been built yet.
      int activeEnergyGrid() const { return m_historyBuilder.activeEnergyGrid(); }
 
+     /// Returns true when the chart is showing only the fallback "Info" tab —
+     /// i.e. no real chart tabs were built for the current device.  Used by
+     /// MainWindow::reselectDevice() to detect that a model rebuild has given
+     /// the device new capabilities and the chart must be fully reconstructed.
+     bool hasOnlyInfoTab() const;
+
 private slots:
     void onWindowComboChanged(int index);
     void onScrollBarChanged(int value);

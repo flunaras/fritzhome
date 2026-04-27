@@ -652,3 +652,47 @@ msgstr "Netto-Energie (Gruppe)"
 
 msgid "Net"
 msgstr "Netto"
+
+# ── Local groups ──────────────────────────────────────────────────────────────
+msgid "Local Groups"
+msgstr "Lokale Gruppen"
+
+msgid "Manage &Local Groups…"
+msgstr "Lokale Gruppen &verwalten …"
+
+msgid "Manage Local Groups"
+msgstr "Lokale Gruppen verwalten"
+
+msgid "&Tools"
+msgstr "&Extras"
+
+msgid "Create a new local group"
+msgstr "Neue lokale Gruppe erstellen"
+
+msgid "Delete the selected group"
+msgstr "Ausgewählte Gruppe löschen"
+
+msgid "Select a group on the left to edit it,\nor click + to create a new one."
+msgstr "Wählen Sie links eine Gruppe aus, um sie zu bearbeiten,\noder klicken Sie auf +, um eine neue zu erstellen."
+
+msgid "Group name"
+msgstr "Gruppenname"
+
+msgid "Members:"
+msgstr "Mitglieder:"
+
+msgid "local group"
+msgstr "lokale Gruppe"
+
+msgid "Delete Group"
+msgstr "Gruppe löschen"
+
+msgid "Delete the group \"%1\"? This cannot be undone."
+msgstr "Gruppe \"%1\" löschen? Dies kann nicht rückgängig gemacht werden."
+
+msgid "New Group"
+msgstr "Neue Gruppe"
+
+# ── Availability states ───────────────────────────────────────────────────────
+msgid "Partial"
+msgstr "Teilweise"

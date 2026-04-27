@@ -148,7 +148,8 @@ struct FritzDevice {
     QString manufacturer;
     QString productname;
     QString name;            // device name
-    bool present = false;    // currently reachable
+    bool present = false;            // currently reachable
+    bool partiallyPresent = false;   // some members online, some offline (local groups only)
     bool isProducer = false; // user-configured: true if device generates power (solar, battery, etc.)
 
     // Temperature (if TEMPERATURE bit set)
@@ -221,3 +222,19 @@ struct FritzDevice {
 };
 
 using FritzDeviceList = QList<FritzDevice>;
+
+// ── Local Groups ─────────────────────────────────────────────────────────────
+
+/**
+ * A locally-defined group that lives entirely on the client side.
+ * Members are identified by AIN (for Fritz!Box devices) or by the
+ * LocalGroup::id of another local group (prefixed with "local:").
+ * Stored in QSettings under the "localGroups" key.
+ */
+struct LocalGroup {
+    QString     id;         ///< stable UUID, generated on creation
+    QString     name;       ///< user-visible label
+    QStringList memberAins; ///< AINs of member devices/groups (local group ids prefixed "local:")
+};
+
+using LocalGroupList = QList<LocalGroup>;

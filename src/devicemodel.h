@@ -3,6 +3,7 @@
 #include <QAbstractItemModel>
 #include <QList>
 #include "fritzdevice.h"
+#include "localgroupmanager.h"
 
 /**
  * DeviceModel is a two-level tree model:
@@ -37,6 +38,11 @@ public:
 
     /// Replace the full device list and rebuild groups.
     void updateDevices(const FritzDeviceList &devices);
+
+    /// Update the locally-defined groups; call after updateDevices() or
+    /// whenever the LocalGroupManager emits groupsChanged().
+    void setLocalGroups(const LocalGroupList &localGroups,
+                        const FritzDeviceList &allFritzDevices);
 
     /// Return the device for a valid leaf index (returns default FritzDevice for group rows).
     FritzDevice deviceAt(const QModelIndex &index) const;
@@ -76,7 +82,9 @@ private:
     QString primaryIconName(const FritzDevice &dev) const;
     QString deviceStatusString(const FritzDevice &dev) const;
 
-    QList<Group> m_groups;
+    QList<Group>    m_groups;
+    FritzDeviceList m_lastFritzDevices; ///< last devices passed to updateDevices()
+    LocalGroupList  m_localGroups;      ///< current local groups (for setLocalGroups())
 
     static constexpr quintptr kGroupSentinel = static_cast<quintptr>(-1);
 };
