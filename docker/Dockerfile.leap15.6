@@ -27,7 +27,10 @@ RUN zypper --non-interactive install --no-recommends \
         which
 
 # ── Qt5 development libraries (all from standard OSS repo) ────────────────────
-RUN zypper --non-interactive install --no-recommends \
+# --allow-downgrade is required because libqt5-qttools-devel pulls in libxslt-devel
+# which has a version conflict with the latest libncurses6 in the update repo;
+# allowing a downgrade of libncurses6 to an older patch version resolves it.
+RUN zypper --non-interactive install --no-recommends --allow-downgrade \
         libQt5Core-devel \
         libQt5Gui-devel \
         libQt5Widgets-devel \
