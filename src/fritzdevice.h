@@ -143,6 +143,7 @@ struct FritzDevice {
     QString unitUID;         // REST API unit UID (e.g. "11630 0015376-1"), used for REST calls
     int functionBitmask = 0; // capabilities bitmask
     bool group = false;      // true if parsed from the groups[] JSON array
+    bool localGroup = false; // true if synthesized as a client-side local group
     QStringList memberAins;  // for groups: AINs of member devices (resolved from memberUnitUids)
     QString fwversion;
     QString manufacturer;
@@ -205,6 +206,8 @@ struct FritzDevice {
 
     /// Icon resource path for this device's primary type.
     QString iconPath() const {
+        if (localGroup)
+            return QStringLiteral(":/icons/device-local-group.svg");
         switch (primaryType()) {
         case PrimaryType::Group:           return QStringLiteral(":/icons/device-group.svg");
         case PrimaryType::ColorBulb:       return QStringLiteral(":/icons/device-color-bulb.svg");

@@ -189,6 +189,7 @@ static FritzDevice synthesizeLocalGroupDevice(
     gdev.unitUID    = gdev.ain;
     gdev.name       = lg.name;
     gdev.group      = true;
+    gdev.localGroup = true;
     gdev.present    = true;
     gdev.memberAins = lg.memberAins;
 
@@ -240,7 +241,7 @@ void DeviceModel::setLocalGroups(const LocalGroupList &localGroups,
         s.beginGroup(QStringLiteral("devices"));
         Group localBucket;
         localBucket.label    = i18n("Local Groups");
-        localBucket.iconName = QStringLiteral(":/icons/device-group.svg");
+        localBucket.iconName = QStringLiteral(":/icons/device-local-group.svg");
         for (const LocalGroup &lg : localGroups) {
             localBucket.devices.append(
                 synthesizeLocalGroupDevice(lg, allFritzDevices, localGroups, s));

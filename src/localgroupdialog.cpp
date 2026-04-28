@@ -271,7 +271,7 @@ void LocalGroupDialog::populateMemberList(const QStringList &checkedAins)
             QString("%1  (%2)").arg(g.name, i18n("local group")), m_memberList);
         item->setData(Qt::UserRole, ain);
         item->setToolTip(ain);
-        item->setIcon(QIcon(QStringLiteral(":/icons/device-group.svg")));
+        item->setIcon(QIcon(QStringLiteral(":/icons/device-local-group.svg")));
         item->setCheckState(checkedAins.contains(ain) ? Qt::Checked : Qt::Unchecked);
     }
 

@@ -3,6 +3,7 @@
     <qresource prefix="/icons">
         <file alias="fritzhome.svg">../data/fritzhome.svg</file>
         <file alias="device-group.svg">../data/icons/device-group.svg</file>
+        <file alias="device-local-group.svg">../data/icons/device-local-group.svg</file>
         <file alias="device-color-bulb.svg">../data/icons/device-color-bulb.svg</file>
         <file alias="device-dimmer.svg">../data/icons/device-dimmer.svg</file>
         <file alias="device-smart-plug.svg">../data/icons/device-smart-plug.svg</file>
