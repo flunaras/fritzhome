@@ -302,6 +302,24 @@ void MainWindow::wireSignals()
                      FritzDevice memberDev = m_model->deviceByAin(ain);
                      const QString label = memberDev.name.isEmpty() ? ain : memberDev.name;
                      m_chartWidget->updateGroupEnergyStatsError(label, error);
+                     // Decrement pending counter so the chart is still built (or
+                     // the error displayed) even if one member's stats fetch fails.
+                     --m_groupStatsPending;
+                     if (m_groupStatsPending == 0) {
+                         QList<MemberHistoryEntry> memberStats;
+                         for (const QString &memberAin : m_groupMemberOrder) {
+                             auto it = m_groupMemberStats.constFind(memberAin);
+                             if (it != m_groupMemberStats.constEnd()) {
+                                 FritzDevice memberDev2 = m_model->deviceByAin(memberAin);
+                                 MemberHistoryEntry entry;
+                                 entry.name       = memberDev2.name.isEmpty() ? memberAin : memberDev2.name;
+                                 entry.stats      = it.value();
+                                 entry.isProducer = memberDev2.isProducer;
+                                 memberStats.append(entry);
+                             }
+                         }
+                         m_chartWidget->updateGroupEnergyStats(memberStats);
+                     }
                  }
             });
     connect(m_api, &FritzApi::networkError,
@@ -897,13 +915,29 @@ void MainWindow::onLocalGroupsChanged()
 
 FritzDeviceList MainWindow::collectMemberDevices(const FritzDevice &groupDev) const
 {
+    QSet<QString> visited;
+    QSet<QString> seenAins;
+    return collectMemberDevicesImpl(groupDev, visited, seenAins);
+}
+
+FritzDeviceList MainWindow::collectMemberDevicesImpl(
+    const FritzDevice &groupDev,
+    QSet<QString> &visited,
+    QSet<QString> &seenAins) const
+{
+    // Cycle guard keyed on the group's AIN (includes "local:" prefix for local
+    // groups, so native and local groups can never collide).
+    if (visited.contains(groupDev.ain))
+        return {};
+    visited.insert(groupDev.ain);
+
     FritzDeviceList members;
     for (const QString &memberId : groupDev.memberAins) {
         if (memberId.startsWith(QStringLiteral("local:"))) {
-            // Nested local group: look up as a synthetic FritzDevice by AIN
+            // Nested local group: resolve its synthetic FritzDevice and recurse.
             FritzDevice m = m_model->deviceByAin(memberId);
             if (!m.ain.isEmpty())
-                members.append(m);
+                members += collectMemberDevicesImpl(m, visited, seenAins);
         } else {
             // memberAins contains device AIns resolved from the REST API's
             // memberUnitUids.  Look up by id; fall back to AIN lookup for
@@ -914,20 +948,41 @@ FritzDeviceList MainWindow::collectMemberDevices(const FritzDevice &groupDev) co
             if (m.ain.isEmpty())
                 continue;
             if (!m.isGroup()) {
-                members.append(m);
+                if (!seenAins.contains(m.ain)) {
+                    seenAins.insert(m.ain);
+                    members.append(m);
+                }
             } else {
                 // Member is a native Fritz!Box group — expand to its leaf
-                // devices so chart tabs and energy history work correctly.
-                // (Stale persisted data may reference native groups even
-                // though the dialog now prevents selecting them.)
-                for (const QString &leafAin : m.memberAins) {
-                    FritzDevice leaf = m_model->deviceByAin(leafAin);
-                    if (!leaf.ain.isEmpty() && !leaf.isGroup())
-                        members.append(leaf);
+                // devices so the stacked chart and per-member energy history
+                // fetch work correctly (each leaf needs its own stats fetch
+                // and appears as a separate bar).
+                // NOTE: collectMemberDevicesImpl already inserts leaves into
+                // seenAins during the recursive call, so the returned list
+                // is already deduplicated — append directly without re-checking.
+                bool anyLeafHasTemp = false;
+                const FritzDeviceList leaves = collectMemberDevicesImpl(m, visited, seenAins);
+                for (const FritzDevice &leaf : leaves) {
+                    members.append(leaf);
+                    if (leaf.hasTemperature() || leaf.hasThermostat())
+                        anyLeafHasTemp = true;
+                }
+                // If the Fritz!Box group unit itself carries temperature data
+                // (via its group control unit) but none of the leaves do, add
+                // the group device so the temperature chart tab is populated.
+                if (!anyLeafHasTemp && (m.hasTemperature() || m.hasThermostat())
+                        && !seenAins.contains(m.ain)) {
+                    seenAins.insert(m.ain);
+                    members.append(m);
                 }
             }
         }
     }
+
+    // Allow re-entry from sibling paths (only block true cycles on the current
+    // call stack), so shared sub-groups are expanded at most once per top-level
+    // call (seenAins deduplicates the result).
+    visited.remove(groupDev.ain);
     return members;
 }
 

@@ -3,6 +3,7 @@
 #include <QColor>
 #include <QFont>
 #include <QIcon>
+#include <QSet>
 #include <QSettings>
 #include <algorithm>
 #include "i18n_shim.h"
@@ -97,16 +98,20 @@ void DeviceModel::updateDevices(const FritzDeviceList &devices)
 // "Local Groups" bucket at the bottom of the tree.
 // ---------------------------------------------------------------------------
 
-/// Recursively collect member FritzDevices for a local group (handles nested
-/// local groups up to reasonable depth to avoid infinite loops).
+/// Recursively collect member FritzDevices for a local group.
+/// @p visited tracks local-group IDs already on the call stack to detect and
+/// break cycles; devices are deduplicated by AIN across all recursive paths.
 static FritzDeviceList collectLocalGroupMembers(
     const LocalGroup &lg,
     const FritzDeviceList &allFritz,
     const LocalGroupList &allLocal,
-    int depth = 0)
+    QSet<QString> &visited,
+    QSet<QString> &seenAins)
 {
-    if (depth > 8)
-        return {};   // safety guard against circular references
+    // Cycle guard: if this group is already being expanded upstream, skip it.
+    if (visited.contains(lg.id))
+        return {};
+    visited.insert(lg.id);
 
     FritzDeviceList result;
     for (const QString &ain : lg.memberAins) {
@@ -114,7 +119,7 @@ static FritzDeviceList collectLocalGroupMembers(
             const QString memberId = ain.mid(6);
             for (const LocalGroup &sub : allLocal) {
                 if (sub.id == memberId) {
-                    result += collectLocalGroupMembers(sub, allFritz, allLocal, depth + 1);
+                    result += collectLocalGroupMembers(sub, allFritz, allLocal, visited, seenAins);
                     break;
                 }
             }
@@ -123,25 +128,30 @@ static FritzDeviceList collectLocalGroupMembers(
                 if (dev.ain != ain)
                     continue;
                 if (!dev.isGroup()) {
-                    result.append(dev);
+                    // Deduplicate: skip if this device was already added via
+                    // another path.
+                    if (!seenAins.contains(dev.ain)) {
+                        seenAins.insert(dev.ain);
+                        result.append(dev);
+                    }
                 } else {
-                    // Member is a native Fritz!Box group — expand to its leaf
-                    // devices so capability union and chart data work correctly.
-                    // (Stale persisted data may reference native groups even
-                    // though the dialog now prevents selecting them.)
-                    for (const QString &leafAin : dev.memberAins) {
-                        for (const FritzDevice &leaf : allFritz) {
-                            if (leaf.ain == leafAin && !leaf.isGroup()) {
-                                result.append(leaf);
-                                break;
-                            }
-                        }
+                    // Member is a native Fritz!Box group — include the group
+                    // device itself so its aggregated capabilities (temperature,
+                    // energy meter, etc.) and live stats are reflected in the
+                    // local group's capability union and power display.
+                    if (!seenAins.contains(dev.ain)) {
+                        seenAins.insert(dev.ain);
+                        result.append(dev);
                     }
                 }
                 break;
             }
         }
     }
+
+    // Allow this group to be re-entered from sibling paths (only block true
+    // cycles within the current expansion chain); remove from visited on exit.
+    visited.remove(lg.id);
     return result;
 }
 
@@ -183,7 +193,8 @@ static FritzDevice synthesizeLocalGroupDevice(
     gdev.memberAins = lg.memberAins;
 
     // Capability union of all members
-    const FritzDeviceList members = collectLocalGroupMembers(lg, allFritz, allLocal);
+    QSet<QString> visited, seenAins;
+    const FritzDeviceList members = collectLocalGroupMembers(lg, allFritz, allLocal, visited, seenAins);
     int onlineCount  = 0;
     int offlineCount = 0;
     for (const FritzDevice &m : members) {

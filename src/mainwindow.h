@@ -6,6 +6,7 @@
 #  include <QMainWindow>
 #endif
 
+#include <QSet>
 #include <QString>
 #include <QModelIndex>
 #include <QDateTime>
@@ -89,6 +90,10 @@ private:
     void setStatusMessage(const QString &msg);
     /// Collect all member FritzDevice objects for a group device.
     FritzDeviceList collectMemberDevices(const FritzDevice &groupDev) const;
+    /// Internal recursive implementation with cycle-detection and deduplication.
+    FritzDeviceList collectMemberDevicesImpl(const FritzDevice &groupDev,
+                                              QSet<QString> &visited,
+                                              QSet<QString> &seenAins) const;
     void closeEvent(QCloseEvent *event) override;
     void showEvent(QShowEvent *event) override;
 

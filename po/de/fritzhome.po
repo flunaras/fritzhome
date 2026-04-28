@@ -684,6 +684,33 @@ msgstr "Mitglieder:"
 msgid "local group"
 msgstr "lokale Gruppe"
 
+msgid "Fritz!Box group"
+msgstr "Fritz!Box-Gruppe"
+
+msgid "Color Bulb"
+msgstr "Farblampe"
+
+msgid "Dimmer"
+msgstr "Dimmer"
+
+msgid "Smart Plug"
+msgstr "Steckdose"
+
+msgid "Switch"
+msgstr "Schalter"
+
+msgid "Thermostat"
+msgstr "Thermostat"
+
+msgid "Blind"
+msgstr "Rolllade"
+
+msgid "Alarm"
+msgstr "Alarm"
+
+msgid "Sensor"
+msgstr "Sensor"
+
 msgid "Delete Group"
 msgstr "Gruppe löschen"
 

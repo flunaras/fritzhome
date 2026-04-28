@@ -941,6 +941,42 @@ oder klicken Sie auf +, um eine neue zu erstellen.</translation>
          <translation>lokale Gruppe</translation>
      </message>
      <message>
+         <source>Fritz!Box group</source>
+         <translation>Fritz!Box-Gruppe</translation>
+     </message>
+     <message>
+         <source>Color Bulb</source>
+         <translation>Farblampe</translation>
+     </message>
+     <message>
+         <source>Dimmer</source>
+         <translation>Dimmer</translation>
+     </message>
+     <message>
+         <source>Smart Plug</source>
+         <translation>Zwischenstecker</translation>
+     </message>
+     <message>
+         <source>Switch</source>
+         <translation>Schalter</translation>
+     </message>
+     <message>
+         <source>Thermostat</source>
+         <translation>Thermostat</translation>
+     </message>
+     <message>
+         <source>Blind</source>
+         <translation>Rolllade</translation>
+     </message>
+     <message>
+         <source>Alarm</source>
+         <translation>Alarm</translation>
+     </message>
+     <message>
+         <source>Sensor</source>
+         <translation>Sensor</translation>
+     </message>
+     <message>
          <source>Delete Group</source>
          <translation>Gruppe löschen</translation>
      </message>

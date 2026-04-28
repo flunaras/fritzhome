@@ -14,9 +14,29 @@
 #include <QDialogButtonBox>
 #include <QFrame>
 #include <QFont>
+#include <QIcon>
 
 // Default name assigned to newly created groups before the user renames them.
 static const char *kDefaultGroupName = QT_TRANSLATE_NOOP("LocalGroupDialog", "New Group");
+
+/// Return a short, singular type label for a Fritz!Box device, used as the
+/// parenthetical suffix in the member list (e.g. "Livingroom  (Smart Plug)").
+static QString deviceTypeLabel(const FritzDevice &dev)
+{
+    switch (dev.primaryType()) {
+    case FritzDevice::PrimaryType::Group:          return i18n("Fritz!Box group");
+    case FritzDevice::PrimaryType::ColorBulb:      return i18n("Color Bulb");
+    case FritzDevice::PrimaryType::Dimmer:         return i18n("Dimmer");
+    case FritzDevice::PrimaryType::SmartPlug:      return i18n("Smart Plug");
+    case FritzDevice::PrimaryType::Switch:         return i18n("Switch");
+    case FritzDevice::PrimaryType::Thermostat:     return i18n("Thermostat");
+    case FritzDevice::PrimaryType::Blind:          return i18n("Blind");
+    case FritzDevice::PrimaryType::Alarm:          return i18n("Alarm");
+    case FritzDevice::PrimaryType::HumiditySensor: return i18n("Humidity Sensor");
+    case FritzDevice::PrimaryType::Sensor:         return i18n("Sensor");
+    }
+    return i18n("Sensor");
+}
 
 // ── Constructor ───────────────────────────────────────────────────────────────
 
@@ -216,17 +236,33 @@ void LocalGroupDialog::populateMemberList(const QStringList &checkedAins)
     m_memberList->blockSignals(true);
     m_memberList->clear();
 
-    // Fritz!Box devices (individual devices only — native groups excluded)
+    // Fritz!Box individual devices
     for (const FritzDevice &dev : m_allDevices) {
         if (dev.isGroup())
             continue;
-        QListWidgetItem *item = new QListWidgetItem(dev.name, m_memberList);
+        QListWidgetItem *item = new QListWidgetItem(
+            QString("%1  (%2)").arg(dev.name, deviceTypeLabel(dev)), m_memberList);
         item->setData(Qt::UserRole, dev.ain);
         item->setToolTip(dev.ain);
+        item->setIcon(QIcon(dev.iconPath()));
         item->setCheckState(checkedAins.contains(dev.ain) ? Qt::Checked : Qt::Unchecked);
     }
 
-    // Other local groups (a group cannot be its own member)
+    // Fritz!Box native groups
+    for (const FritzDevice &dev : m_allDevices) {
+        if (!dev.isGroup())
+            continue;
+        QListWidgetItem *item = new QListWidgetItem(
+            QString("%1  (%2)").arg(dev.name, deviceTypeLabel(dev)), m_memberList);
+        item->setData(Qt::UserRole, dev.ain);
+        item->setToolTip(dev.ain);
+        item->setIcon(QIcon(dev.iconPath()));
+        item->setCheckState(checkedAins.contains(dev.ain) ? Qt::Checked : Qt::Unchecked);
+    }
+
+    // Other local groups (a group cannot be its own direct or transitive member —
+    // the cycle check is done at chart-render time; here we only exclude
+    // self-membership to keep the UI simple).
     for (const LocalGroup &g : m_manager->groups()) {
         if (g.id == m_editingId)
             continue;
@@ -234,6 +270,8 @@ void LocalGroupDialog::populateMemberList(const QStringList &checkedAins)
         QListWidgetItem *item = new QListWidgetItem(
             QString("%1  (%2)").arg(g.name, i18n("local group")), m_memberList);
         item->setData(Qt::UserRole, ain);
+        item->setToolTip(ain);
+        item->setIcon(QIcon(QStringLiteral(":/icons/device-group.svg")));
         item->setCheckState(checkedAins.contains(ain) ? Qt::Checked : Qt::Unchecked);
     }
 
