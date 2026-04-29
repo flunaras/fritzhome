@@ -499,7 +499,8 @@ void EnergyHistoryBuilder::finalizeEnergyHistoryTab(
     const QStringList &viewLabels,
     int selectedIdx,
     const QString &totalText,
-    int grid)
+    int grid,
+    const QStringList &missingMembers)
 {
     chartView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
@@ -574,12 +575,33 @@ void EnergyHistoryBuilder::finalizeEnergyHistoryTab(
 
     m_activeEnergyGrid = grid;
 
+    // If some members provided no data for this resolution, show a warning banner.
+    QWidget *tabRoot = container;
+    if (!missingMembers.isEmpty()) {
+        QLabel *banner = new QLabel(
+            i18n("Incomplete data — no history for: %1", missingMembers.join(QStringLiteral(", "))));
+        banner->setWordWrap(true);
+        banner->setAlignment(Qt::AlignCenter);
+        banner->setContentsMargins(6, 4, 6, 4);
+        banner->setStyleSheet(
+            QStringLiteral("QLabel { background: #fff3cd; color: #856404; "
+                           "border-bottom: 1px solid #ffc107; }"));
+
+        tabRoot = new QWidget();
+        tabRoot->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+        QVBoxLayout *vl = new QVBoxLayout(tabRoot);
+        vl->setContentsMargins(0, 0, 0, 0);
+        vl->setSpacing(0);
+        vl->addWidget(banner);
+        vl->addWidget(container);
+    }
+
     int insertAt = (m_energyHistoryTabIndex >= 0
                     && m_energyHistoryTabIndex <= m_owner.m_tabs->count())
                    ? m_energyHistoryTabIndex
                    : m_owner.m_tabs->count();
     m_energyHistoryTabIndex = m_owner.m_tabs->insertTab(
-        insertAt, container, i18n("Energy History"));
+        insertAt, tabRoot, i18n("Energy History"));
 }
 
 // ── Single-device energy history chart ──────────────────────────────────────
@@ -1073,6 +1095,29 @@ void EnergyHistoryBuilder::buildEnergyHistoryChartStacked(
         ? QString("%1 kWh").arg(grandTotal / 1000.0, 0, 'f', 2)
         : QString("%1 Wh").arg(grandTotal, 0, 'f', 1);
 
+    // Collect names of members that have no usable data for the active grid.
+    // A member is considered missing if it has no series at all for this grid,
+    // or if every value in the series is zero or NaN (Fritz!Box sometimes returns
+    // an all-zero/all-NaN series for online devices that haven't accumulated data yet).
+    QStringList missingMembers;
+    for (int m = 0; m < nMembers; ++m) {
+        const MemberSeriesSet &ms = memberSets[m];
+        const StatSeries *ss = (view.grid == 900)     ? ms.s900
+                             : (view.grid == 86400)   ? ms.s86400
+                                                      : ms.s2678400;
+        bool hasUsableData = false;
+        if (ss) {
+            for (double v : ss->values) {
+                if (!std::isnan(v) && v != 0.0) {
+                    hasUsableData = true;
+                    break;
+                }
+            }
+        }
+        if (!hasUsableData)
+            missingMembers.append(memberStats.at(m).name);
+    }
+
     // ── Net legend entry ─────────────────────────────────────────────────────
     // Only shown when members have mixed producer/consumer roles (same condition
     // as the ghost-bar overlay above).  An empty QLineSeries registers a legend
@@ -1090,5 +1135,5 @@ void EnergyHistoryBuilder::buildEnergyHistoryChartStacked(
             netLegend->attachAxis(ax);
     }
 
-    finalizeEnergyHistoryTab(chartView, viewLabelStrings, selectedIdx, totalText, view.grid);
+    finalizeEnergyHistoryTab(chartView, viewLabelStrings, selectedIdx, totalText, view.grid, missingMembers);
 }

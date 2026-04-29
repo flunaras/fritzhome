@@ -1020,6 +1020,10 @@ oder klicken Sie auf +, um eine neue zu erstellen.</translation>
          <source>Net</source>
          <translation>Netto</translation>
      </message>
+     <message>
+         <source>Incomplete data — no history for: %1</source>
+         <translation>Unvollständige Daten – keine Historie für: %1</translation>
+     </message>
 
  </context>
  </TS>

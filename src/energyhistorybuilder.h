@@ -8,6 +8,13 @@
 /// Handles three resolution views (15-min / daily / monthly) for both
 /// single-device and stacked-group modes.  Delegates to ChartWidget for
 /// tab insertion, event filter installation, and settings persistence.
+///
+/// For stacked group charts, if one or more members have no usable data for
+/// the active resolution (missing series, or all-zero/NaN values), a yellow
+/// warning banner is shown above the chart listing the affected member names
+/// via the i18n string "Incomplete data — no history for: %1".
+/// Members with no data at all (all-series-null) instead produce the standard
+/// "No energy data available" placeholder rather than a partial chart.
 
 #include <QList>
 #include <QString>
@@ -124,11 +131,15 @@ private:
         int grid, bool useKwh, double minY, double maxY);
 
     /// Build the container, install event filters, set member state, insert tab.
+    /// \param missingMembers  Names of group members that had no energy data for
+    ///                        the current resolution — shown as a warning banner
+    ///                        above the chart.  Pass an empty list for no banner.
     void finalizeEnergyHistoryTab(QChartView *chartView,
                                   const QStringList &viewLabels,
                                   int selectedIdx,
                                   const QString &totalText,
-                                  int grid);
+                                  int grid,
+                                  const QStringList &missingMembers = QStringList());
 
     // -- Energy history chart state ----------------------------------------
     int         m_energyHistoryTabIndex  = -1;

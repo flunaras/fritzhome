@@ -723,3 +723,7 @@ msgstr "Neue Gruppe"
 # ── Availability states ───────────────────────────────────────────────────────
 msgid "Partial"
 msgstr "Teilweise"
+
+# ── Energy history incomplete data warning ────────────────────────────────────
+msgid "Incomplete data — no history for: %1"
+msgstr "Unvollständige Daten – keine Historie für: %1"
