@@ -44,7 +44,11 @@ src/
 ├── humiditysensorwidget.h / .cpp Panel: humidity sensor (read-only)
 ├── alarmwidget.h / .cpp         Panel: door/window alarm sensor
 │
-├── chartwidget.h / .cpp         Qt Charts time-series and energy history
+├── chartwidget.h / .cpp         Qt Charts time-series and energy history (orchestration + rolling charts)
+├── energyhistorybuilder.h / .cpp Energy History chart tab — single-device and stacked-group bar charts,
+│                                 warning banner for members with missing data, resolution combo, error display
+├── localgroupmanager.h / .cpp   Local group persistence — stores user-defined groups in QSettings
+├── localgroupdialog.h / .cpp    "Manage Local Groups" dialog — create, rename, delete, add/remove members
 ├── secretstore.h / .cpp         Cross-backend password storage (KWallet / libsecret / QSettings)
 └── i18n_shim.h                  i18n() macro — maps to KI18n or QCoreApplication::translate() depending on HAVE_KF
 ```
@@ -82,7 +86,7 @@ QObject
 Data structures (not QObject-derived, plain structs in `fritzdevice.h`):
 
 ```
-FritzDevice
+FritzDevice                     (`group` = Fritz!Box hardware group; `localGroup` = client-side local group)
 ├── SwitchStats
 ├── EnergyStats
 ├── ThermostatStats
@@ -224,16 +228,17 @@ MainWindow  (QMainWindow)
 
 **Group bucket priority** (first matching rule wins per device):
 
-1. Groups (Fritz!Box device groups)
-2. Color Bulbs
-3. Dimmers
-4. Smart Plugs (Switch + EnergyMeter)
-5. Switches
-6. Thermostats
-7. Blinds
-8. Alarms
-9. Humidity Sensors
-10. Sensors (catch-all)
+1. Local Groups (client-side groups synthesized from `LocalGroupManager`; `localGroup == true`)
+2. Groups (Fritz!Box hardware device groups; `group == true`)
+3. Color Bulbs
+4. Dimmers
+5. Smart Plugs (Switch + EnergyMeter)
+6. Switches
+7. Thermostats
+8. Blinds
+9. Alarms
+10. Humidity Sensors
+11. Sensors (catch-all)
 
 **Special roles:**
 - `Qt::UserRole` on a group header → raw label string (used for expansion-state restore)
@@ -800,6 +805,25 @@ Each `QBarSet` gets its own `hovered` lambda; the tooltip format is
 `"%1\n%2: %3 %4"` (date, member name, value, unit) — one line per segment rather than
 the single-device `"%1\n%2 %3"` (date, value, unit).  The same `comboOverlay` event
 filter fix (see energy history bar chart details above) is applied here too.
+
+### Incomplete data warning banner
+
+After the chart is built, `buildEnergyHistoryChartStacked` checks each member's
+`MemberSeriesSet` for the active grid resolution. A member is considered **missing** if
+it has no `StatSeries` for that grid at all, or if every value in the series is `0.0`
+or `NaN` (Fritz!Box sometimes returns an all-zero/all-NaN series for online devices
+that haven't yet accumulated data for a given resolution). The names of such members
+are collected into a `missingMembers` list and passed to `finalizeEnergyHistoryTab()`.
+
+`finalizeEnergyHistoryTab()` wraps the chart container in an outer `QVBoxLayout` and
+prepends a yellow warning `QLabel` (styled `background: #fff3cd; color: #856404;
+border-bottom: 1px solid #ffc107`) when `missingMembers` is non-empty. The label
+displays the i18n string `"Incomplete data — no history for: %1"` with member names
+joined by `", "`.
+
+The banner is torn down and rebuilt with the chart on every resolution change or device
+switch. Members with no data at all (every series null, `grandTotal == 0`) hit the
+existing `buildEnergyHistoryPlaceholder` path instead and never produce a banner.
 
 ### GCC 15 warning suppression
 

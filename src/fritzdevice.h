@@ -143,7 +143,12 @@ struct FritzDevice {
     QString unitUID;         // REST API unit UID (e.g. "11630 0015376-1"), used for REST calls
     int functionBitmask = 0; // capabilities bitmask
     bool group = false;      // true if parsed from the groups[] JSON array
-    bool localGroup = false; // true if synthesized as a client-side local group
+    /// True if this device is a client-side local group synthesized from LocalGroupManager,
+    /// never parsed from the Fritz!Box API.  Local groups use a distinct orange icon
+    /// (:/icons/device-local-group.svg) and are placed in their own "Local Groups" tree bucket
+    /// ahead of Fritz!Box hardware groups.  The \c group flag is also set to \c true for
+    /// local groups so that all group-logic paths (energy history, stacked charts, etc.) apply.
+    bool localGroup = false;
     QStringList memberAins;  // for groups: AINs of member devices (resolved from memberUnitUids)
     QString fwversion;
     QString manufacturer;
@@ -204,7 +209,9 @@ struct FritzDevice {
         return PrimaryType::Sensor;
     }
 
-    /// Icon resource path for this device's primary type.
+    /// Returns the Qt resource path for this device's icon.
+    /// Local groups (\c localGroup == true) always return the orange local-group icon
+    /// regardless of \c primaryType().  All other devices are mapped by \c primaryType().
     QString iconPath() const {
         if (localGroup)
             return QStringLiteral(":/icons/device-local-group.svg");
