@@ -296,14 +296,20 @@ void MainWindow::wireSignals()
                      return;
                  }
                  // Group case: AIN is one of the members we are collecting.
+                 // Do NOT replace the chart tab with an error display here —
+                 // the final updateGroupEnergyStats() call below rebuilds the
+                 // stacked chart with a "missing data" warning banner that
+                 // names the failed members.  Showing a full error tab now
+                 // would (a) clobber the chart for the whole group when only
+                 // one member failed, and (b) persist across periodic refresh
+                 // ticks where the skip-rebuild guard in updateGroupEnergyStats
+                 // returns early without rebuilding the tab.
                  if (m_groupStatsPending > 0
                      && m_selectedAin == m_groupAin
                      && m_groupMemberStats.contains(ain)) {
-                     FritzDevice memberDev = m_model->deviceByAin(ain);
-                     const QString label = memberDev.name.isEmpty() ? ain : memberDev.name;
-                     m_chartWidget->updateGroupEnergyStatsError(label, error);
-                     // Decrement pending counter so the chart is still built (or
-                     // the error displayed) even if one member's stats fetch fails.
+                     // Decrement pending counter so the chart is still built
+                     // (with a warning banner naming the failed member) even
+                     // if one member's stats fetch fails.
                      --m_groupStatsPending;
                      if (m_groupStatsPending == 0) {
                          QList<MemberHistoryEntry> memberStats;
