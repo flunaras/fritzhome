@@ -317,6 +317,14 @@ void EnergyHistoryBuilder::showEnergyHistoryError(const QString &caption,
     }
 
     // Otherwise, replace the placeholder with a framed error display.
+    // Capture the user's currently-active tab BEFORE the remove/insert so we
+    // can restore it afterwards.  Without this, Qt auto-selects a neighbour
+    // tab (typically "Energy") when the active "Energy History" tab is
+    // removed, and the user's selection is silently lost on every error
+    // update — including periodic refresh ticks where the data fetch fails.
+    const QString savedActiveTab = plainTabText(
+        m_owner.m_tabs->tabText(m_owner.m_tabs->currentIndex()));
+
     m_owner.m_tabs->blockSignals(true);
     QWidget *old = m_owner.m_tabs->widget(m_energyHistoryTabIndex);
     m_owner.m_tabs->removeTab(m_energyHistoryTabIndex);
@@ -327,6 +335,17 @@ void EnergyHistoryBuilder::showEnergyHistoryError(const QString &caption,
     QWidget *errorWidget = createErrorDisplayWidget(caption, errors);
     QWidget *framedWidget = wrapInFramedContainer(errorWidget);
     m_owner.m_tabs->insertTab(m_energyHistoryTabIndex, framedWidget, i18n("Energy History"));
+
+    // Restore the previously-active tab by title (indices may have shifted).
+    int restoreIdx = m_owner.m_tabs->currentIndex();
+    for (int i = 0; i < m_owner.m_tabs->count(); ++i) {
+        if (plainTabText(m_owner.m_tabs->tabText(i)) == savedActiveTab) {
+            restoreIdx = i;
+            break;
+        }
+    }
+    m_owner.m_tabs->setCurrentIndex(restoreIdx);
+
     m_owner.m_tabs->blockSignals(false);
 }
 
