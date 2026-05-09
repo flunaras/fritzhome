@@ -6,6 +6,7 @@
 #include <QSet>
 #include <QSettings>
 #include <algorithm>
+#include <functional>
 #include "i18n_shim.h"
 
 // QSettings key for the per-device producer flag (shared with mainwindow.cpp
@@ -354,6 +355,61 @@ Qt::ItemFlags DeviceModel::flags(const QModelIndex &index) const
     return Qt::ItemIsEnabled | Qt::ItemIsSelectable;
 }
 
+double DeviceModel::signedPowerForDisplay(const FritzDevice &dev) const
+{
+    if (!dev.hasEnergyMeter() || !dev.energyStats.valid)
+        return 0.0;
+
+    // Local groups synthesize their power as a pre-signed sum in
+    // accumulateMemberEnergy(), so the cached value is already correct.
+    if (dev.localGroup)
+        return dev.energyStats.power;
+
+    // Native Fritz!Box (hardware) group: the API-supplied power sums all
+    // member powers without producer sign convention.  Recompute by walking
+    // the immediate members (recursing into nested hardware groups) and
+    // applying the QSettings producer flag.  Cycle guard via QSet.
+    if (dev.isGroup()) {
+        QSettings s;
+        s.beginGroup(QStringLiteral("devices"));
+
+        QSet<QString> visited;
+        std::function<double(const FritzDevice &)> sumSigned =
+            [&](const FritzDevice &g) -> double {
+                if (visited.contains(g.ain))
+                    return 0.0;
+                visited.insert(g.ain);
+                double total = 0.0;
+                for (const QString &memberAin : g.memberAins) {
+                    // Local-group prefix shouldn't appear in a hardware group's
+                    // memberAins, but guard for robustness.
+                    FritzDevice m = deviceByAin(memberAin);
+                    if (m.ain.isEmpty())
+                        m = deviceById(memberAin);
+                    if (m.ain.isEmpty())
+                        continue;
+                    if (m.isGroup() && !m.localGroup) {
+                        total += sumSigned(m);
+                        continue;
+                    }
+                    if (!m.hasEnergyMeter() || !m.energyStats.valid)
+                        continue;
+                    const bool producer = s.value(
+                        m.ain + QLatin1Char('/')
+                            + QString::fromLatin1(kSettingsKeyIsProducer),
+                        false).toBool();
+                    total += producer ? -m.energyStats.power
+                                      :  m.energyStats.power;
+                }
+                return total;
+            };
+        return sumSigned(dev);
+    }
+
+    // Plain device leaf — runtime isProducer flag is authoritative.
+    return dev.isProducer ? -dev.energyStats.power : dev.energyStats.power;
+}
+
 QVariant DeviceModel::data(const QModelIndex &index, int role) const
 {
     if (!index.isValid())
@@ -398,7 +454,7 @@ QVariant DeviceModel::data(const QModelIndex &index, int role) const
             return QString("-");
         case ColPower:
             if (dev.hasEnergyMeter() && dev.energyStats.valid) {
-                const double power = dev.isProducer ? -dev.energyStats.power : dev.energyStats.power;
+                const double power = signedPowerForDisplay(dev);
                 return QString("%1 W").arg(power, 0, 'f', 1);
             }
             return QString("-");
@@ -429,7 +485,11 @@ QVariant DeviceModel::data(const QModelIndex &index, int role) const
             tip += QString("Switch: %1<br/>").arg(dev.switchStats.on ? i18n("On") : i18n("Off"));
         if (dev.hasEnergyMeter() && dev.energyStats.valid) {
             const double sign = dev.isProducer ? -1.0 : 1.0;
-            tip += QString("Power: %1 W<br/>").arg(sign * dev.energyStats.power, 0, 'f', 1);
+            // Power: use the signed-aggregation helper so hardware groups
+            // honour each member's producer flag.  Energy still uses the raw
+            // sign-from-isProducer value (an aggregate-energy helper is a
+            // separate concern; not part of this fix).
+            tip += QString("Power: %1 W<br/>").arg(signedPowerForDisplay(dev), 0, 'f', 1);
             tip += QString("Energy: %1 Wh<br/>").arg(sign * dev.energyStats.energy, 0, 'f', 0);
             tip += QString("Voltage: %1 V<br/>").arg(dev.energyStats.voltage, 0, 'f', 1);
         }

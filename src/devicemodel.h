@@ -82,6 +82,18 @@ private:
     QString primaryIconName(const FritzDevice &dev) const;
     QString deviceStatusString(const FritzDevice &dev) const;
 
+    /// Compute the displayed (signed) power value for a device leaf.
+    ///
+    /// For ordinary devices this returns power negated when the device is
+    /// flagged as a producer.  For native Fritz!Box (hardware) groups, the
+    /// API-supplied energyStats.power is an unsigned sum that ignores the
+    /// per-member producer flag, so this method recomputes the total by
+    /// iterating the member AINs and applying the sign convention from
+    /// QSettings (the authoritative producer-flag store, matching
+    /// accumulateMemberEnergy()).  Local groups already carry signed power
+    /// in their synthetic FritzDevice and are returned as-is.
+    double signedPowerForDisplay(const FritzDevice &dev) const;
+
     QList<Group>    m_groups;
     FritzDeviceList m_lastFritzDevices; ///< last devices passed to updateDevices()
     LocalGroupList  m_localGroups;      ///< current local groups (for setLocalGroups())
