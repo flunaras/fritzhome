@@ -152,7 +152,11 @@ qint64 niceTimeTickIntervalMs(qint64 windowMs)
         24 * 3600 * 1000LL, // 24 h
     };
     const int n = static_cast<int>(sizeof(kCandidates) / sizeof(kCandidates[0]));
-    const int targetTicks = 5;
+    // Target a denser axis: ~10 labelled ticks across the visible window so
+    // the live power and temperature charts have time labels at finer
+    // granularity (Qt's QDateTimeAxis default of 5 leaves long unlabelled
+    // stretches).
+    const int targetTicks = 10;
     qint64 rawStep = windowMs / targetTicks;
     for (int i = 0; i < n; ++i) {
         if (kCandidates[i] >= rawStep)
