@@ -392,7 +392,13 @@ void MainWindow::closeEvent(QCloseEvent *event)
     s.setValue(QStringLiteral("ui/geometry"),      saveGeometry());
     s.setValue(QStringLiteral("ui/windowState"),   saveState());
     s.setValue(QStringLiteral("ui/splitterState"), m_splitter->saveState());
-    s.setValue(QStringLiteral("ui/headerState"),   m_deviceTree->header()->saveState());
+    // Only persist the tree header state if the columns were actually sized
+    // for real device data this session.  If the app started offline (no
+    // device list ever arrived), initColumnSizes() never ran, the tree still
+    // has Qt-default column widths, and saving them now would overwrite the
+    // previously-good header state from a successful prior session.
+    if (m_initialColumnSizeDone)
+        s.setValue(QStringLiteral("ui/headerState"), m_deviceTree->header()->saveState());
 
     // Stop polling and abort any in-flight network requests before the
     // application tears down.  Calling qApp->quit() synchronously here would
