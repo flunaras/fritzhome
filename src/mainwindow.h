@@ -103,6 +103,18 @@ private:
     /// Load all producer/consumer settings from QSettings into device model.
     void loadProducerSettings();
 
+    // ── Per-connection tree state persistence ───────────────────────────────
+    /// Build the QSettings key prefix for the currently configured connection
+    /// (host + username). Returns an empty string if either is empty.
+    /// Used to keep tree state separate per Fritz!Box / per user account.
+    QString connectionStateKey() const;
+    /// Persist the tree state (expanded groups + selected AIN) for the active
+    /// connection. No-op if no successful login has happened this session.
+    void saveConnectionTreeState();
+    /// Load saved tree state for the active connection into m_pendingExpanded
+    /// and m_pendingSelectedAin so the next device-list update can apply them.
+    void loadConnectionTreeState();
+
     // ── onDeviceListUpdated helpers ───────────────────────────────────────
     /// Save expanded-group labels from the device tree (before model reset).
     QSet<QString> saveTreeState() const;
@@ -158,4 +170,18 @@ private:
     QStringList                     m_groupMemberOrder; ///< AIns in device-list order
     int                             m_groupStatsPending = 0;
     QString                         m_groupAin;         ///< AIN of the group being fetched
+
+    // ── Per-connection tree state ─────────────────────────────────────────
+    /// True once onLoginSuccess() has fired for the active connection.
+    /// Only when this is true do we persist tree state on close — otherwise
+    /// a failed/aborted login would overwrite a previous good state.
+    bool        m_loginSucceeded = false;
+    /// Saved expanded-group labels waiting to be applied on the first
+    /// device-list update following a successful login.
+    QSet<QString> m_pendingExpandedGroups;
+    /// Saved selected device AIN waiting to be applied on the first
+    /// device-list update following a successful login. Empty once consumed.
+    QString     m_pendingSelectedAin;
+    /// True while we are waiting to apply the restored tree state.
+    bool        m_pendingTreeRestore = false;
 };

@@ -391,6 +391,7 @@ public:
    - Connect to Fritz!Box, verify device list loads
    - Switch a device on/off, check refresh timing
    - Expand/collapse groups, verify tree state persists
+   - Quit and re-launch: verify expanded groups, selected device, control panel and chart widget are all restored correctly (per-`(user, host)` snapshot)
    - Switch to Energy History tab, check chart renders without crashes
 
 4. **Check for obvious issues** in the Docker build output:

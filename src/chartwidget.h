@@ -99,6 +99,12 @@ public:
      /// the device new capabilities and the chart must be fully reconstructed.
      bool hasOnlyInfoTab() const;
 
+     /// Returns true when the chart has no tabs at all, which happens after
+     /// construction until updateDevice() has been called for the first time.
+     /// Used by MainWindow::reselectDevice() to detect that the chart needs
+     /// a full build rather than a rolling update during session restore.
+     bool isEmpty() const;
+
 private slots:
     void onWindowComboChanged(int index);
     void onScrollBarChanged(int value);

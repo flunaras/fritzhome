@@ -247,6 +247,11 @@ bool ChartWidget::hasOnlyInfoTab() const
         && plainTabText(m_tabs->tabText(0)) == i18n("Info");
 }
 
+bool ChartWidget::isEmpty() const
+{
+    return m_tabs->count() == 0;
+}
+
 void ChartWidget::restoreTabAndApplyWindow(const QString &activeTabText)
 {
     {

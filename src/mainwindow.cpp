@@ -400,6 +400,10 @@ void MainWindow::closeEvent(QCloseEvent *event)
     if (m_initialColumnSizeDone)
         s.setValue(QStringLiteral("ui/headerState"), m_deviceTree->header()->saveState());
 
+    // Persist per-connection tree state (expanded groups + selected device).
+    // Only writes if a successful login happened this session — guarded inside.
+    saveConnectionTreeState();
+
     // Stop polling and abort any in-flight network requests before the
     // application tears down.  Calling qApp->quit() synchronously here would
     // destroy QNetworkAccessManager (and its pending replies) while their
@@ -432,6 +436,18 @@ void MainWindow::configure(const QString &host,
                            int pollingIntervalSeconds,
                            bool ignoreSsl)
 {
+    // If we were previously logged in to a different connection, persist its
+    // tree state now (before m_api gets reconfigured) so it isn't lost.
+    if (m_loginSucceeded
+        && (m_api->host() != host || m_api->username() != username)) {
+        saveConnectionTreeState();
+    }
+    // New connection attempt: previous success no longer applies.
+    m_loginSucceeded     = false;
+    m_pendingTreeRestore = false;
+    m_pendingExpandedGroups.clear();
+    m_pendingSelectedAin.clear();
+
     m_pollingInterval = pollingIntervalSeconds;
     m_api->setHost(host);
     m_api->setCredentials(username, password);
@@ -573,6 +589,13 @@ void MainWindow::setupStatusBar()
 void MainWindow::onLoginSuccess()
 {
     setStatusMessage(i18n("Connected to %1", m_api->host()));
+    // Mark this session as having reached an authenticated state. Tree state
+    // is only persisted on close once this flag is set, so a failed login
+    // can never wipe out the previous session's snapshot.
+    m_loginSucceeded = true;
+    // Load saved tree state for this (host, user) pair; it will be applied
+    // when the next device-list update arrives (onDeviceListUpdated).
+    loadConnectionTreeState();
     m_api->startPolling(m_pollingInterval * 1000);
     // Fetch immediately so the device list appears without waiting for the
     // first interval tick
@@ -654,6 +677,92 @@ void MainWindow::restoreTreeState(const QSet<QString> &expandedGroups, bool expa
     }
 }
 
+// ── Per-connection tree state persistence ──────────────────────────────────
+//
+// Tree state (expanded groups + selected device) is stored per-connection so
+// users who switch between multiple Fritz!Boxes get the correct UI restored
+// for each one. The key prefix is derived from host + username; QSettings'
+// group separator '/' is replaced in the components so it cannot be confused
+// with the path structure.
+
+QString MainWindow::connectionStateKey() const
+{
+    const QString host = m_api ? m_api->host() : QString();
+    const QString user = m_api ? m_api->username() : QString();
+    if (host.isEmpty() || user.isEmpty())
+        return QString();
+
+    // Sanitize: QSettings uses '/' as a separator, and '\\' has special meaning
+    // on the Windows registry backend. Replace both to keep the key flat.
+    auto sanitize = [](QString s) {
+        s.replace(QLatin1Char('/'),  QLatin1Char('_'));
+        s.replace(QLatin1Char('\\'), QLatin1Char('_'));
+        return s;
+    };
+    return QStringLiteral("connections/%1@%2")
+            .arg(sanitize(user), sanitize(host));
+}
+
+void MainWindow::saveConnectionTreeState()
+{
+    // Only persist after a confirmed successful login this session; otherwise
+    // a failed or aborted login could overwrite a previously good snapshot
+    // with an empty / partially-populated tree state.
+    if (!m_loginSucceeded)
+        return;
+
+    const QString prefix = connectionStateKey();
+    if (prefix.isEmpty())
+        return;
+
+    QSettings s;
+    // Collect currently expanded groups. If the device list never populated
+    // (e.g. lost network right after login), m_model is empty and
+    // saveTreeState() returns an empty set — but we leave any pending
+    // restore values untouched by preferring them in that case.
+    QStringList expanded;
+    if (m_model->rowCount() > 0) {
+        const QSet<QString> set = saveTreeState();
+        expanded = QStringList(set.begin(), set.end());
+    } else if (m_pendingTreeRestore) {
+        // Restore never completed — keep the previously saved snapshot.
+        expanded = QStringList(m_pendingExpandedGroups.begin(),
+                               m_pendingExpandedGroups.end());
+    }
+
+    // Selected AIN: prefer the live selection, fall back to a pending
+    // restore value that never got applied.
+    QString selectedAin = m_selectedAin;
+    if (selectedAin.isEmpty() && m_pendingTreeRestore)
+        selectedAin = m_pendingSelectedAin;
+
+    s.setValue(prefix + QStringLiteral("/expandedGroups"), expanded);
+    s.setValue(prefix + QStringLiteral("/selectedAin"),    selectedAin);
+}
+
+void MainWindow::loadConnectionTreeState()
+{
+    m_pendingExpandedGroups.clear();
+    m_pendingSelectedAin.clear();
+    m_pendingTreeRestore = false;
+
+    const QString prefix = connectionStateKey();
+    if (prefix.isEmpty())
+        return;
+
+    QSettings s;
+    if (!s.contains(prefix + QStringLiteral("/expandedGroups"))
+        && !s.contains(prefix + QStringLiteral("/selectedAin")))
+        return;
+
+    const QStringList expanded =
+        s.value(prefix + QStringLiteral("/expandedGroups")).toStringList();
+    m_pendingExpandedGroups = QSet<QString>(expanded.begin(), expanded.end());
+    m_pendingSelectedAin    =
+        s.value(prefix + QStringLiteral("/selectedAin")).toString();
+    m_pendingTreeRestore    = true;
+}
+
 void MainWindow::initColumnSizes(const FritzDeviceList &devices)
 {
     if (m_initialColumnSizeDone || devices.isEmpty())
@@ -716,12 +825,14 @@ void MainWindow::reselectDevice(const QString &ain)
 
             // Poll tick for the same device: update series in-place without
             // rebuilding charts (avoids flicker and unnecessary work).
-            // Exception: if only the Info placeholder tab is shown (e.g. the
-            // device was clicked before connection and had no capabilities yet),
-            // do a full rebuild now that it may have real chart data.
+            // Exception: if the chart has no tabs yet (first call after
+            // session restore) or only the Info placeholder tab is shown
+            // (e.g. the device was clicked before connection and had no
+            // capabilities yet), do a full rebuild now that it may have
+            // real chart data.
             const FritzDeviceList memberDevs = dev.isGroup()
                 ? collectMemberDevices(dev) : FritzDeviceList();
-            if (m_chartWidget->hasOnlyInfoTab())
+            if (m_chartWidget->isEmpty() || m_chartWidget->hasOnlyInfoTab())
                 m_chartWidget->updateDevice(dev, memberDevs);
             else
                 m_chartWidget->updateRollingCharts(dev, memberDevs);
@@ -792,8 +903,20 @@ void MainWindow::onDeviceListUpdated(const FritzDeviceList &devices)
     // capture it here, before that chain runs.
     const QString previousAin = m_selectedAin;
 
-    const QSet<QString> expandedGroups = saveTreeState();
+    QSet<QString> expandedGroups = saveTreeState();
     const bool firstLoad = expandedGroups.isEmpty() && m_model->rowCount() == 0;
+
+    // If a per-connection restore is pending (set by onLoginSuccess), apply
+    // the saved snapshot now that the model is about to be populated. This
+    // happens only once per successful login.
+    QString restoreSelectedAin;
+    if (m_pendingTreeRestore) {
+        expandedGroups       = m_pendingExpandedGroups;
+        restoreSelectedAin   = m_pendingSelectedAin;
+        m_pendingTreeRestore = false;
+        m_pendingExpandedGroups.clear();
+        m_pendingSelectedAin.clear();
+    }
 
     m_lastFritzDevices = devices;
     m_model->updateDevices(devices);
@@ -805,13 +928,23 @@ void MainWindow::onDeviceListUpdated(const FritzDeviceList &devices)
     loadProducerSettings();
 
     initColumnSizes(devices);
-    restoreTreeState(expandedGroups, firstLoad);
+    // When restoring saved state, never fall back to expand-all even on first
+    // load — the user's saved snapshot is authoritative (it may legitimately
+    // contain zero expanded groups).
+    const bool expandAll = firstLoad && restoreSelectedAin.isEmpty()
+                                     && expandedGroups.isEmpty();
+    restoreTreeState(expandedGroups, expandAll);
 
     // Keep the current selection / panel in sync.
-    // Use previousAin because m_selectedAin was cleared by the model reset
-    // triggering currentChanged → onDeviceSelected(invalid).
-    if (!previousAin.isEmpty()) {
-        reselectDevice(previousAin);
+    // Prefer the saved restore AIN over previousAin: a session restore should
+    // win on the first list update after login. previousAin is only set if the
+    // user clicked something between login and the first list arriving — which
+    // is unlikely but harmless to honour.
+    const QString selectionAin = !restoreSelectedAin.isEmpty()
+                                ? restoreSelectedAin
+                                : previousAin;
+    if (!selectionAin.isEmpty()) {
+        reselectDevice(selectionAin);
     }
 
     const int n = devices.size();
@@ -1066,11 +1199,25 @@ void MainWindow::updateDevicePanel(const FritzDevice &device)
     if (device.isGroup() && panelIdx == PanelSwitch) {
         FritzDevice dev = device;
         synthesizeGroupSwitchState(dev, dw);
-        return;
+    } else {
+        dw->updateDevice(device);
+        dw->setMembers(FritzDeviceList()); // clear any stale member menus
     }
 
-    dw->updateDevice(device);
-    dw->setMembers(FritzDeviceList()); // clear any stale member menus
+    // Refresh the stack's fixed height. The QStackedWidget::currentChanged
+    // handler fixes the height to the current page's sizeHint, but for a
+    // page being shown for the very first time (e.g. immediately after
+    // session restore) the inner widget's content has not yet been populated
+    // by updateDevice(), so its sizeHint is the bare-construction minimum.
+    // The resulting tiny fixed height makes the panel appear empty until the
+    // next selection change. Re-measure now that the widget has real data —
+    // updating only the height so the horizontal stretch from the parent
+    // layout is preserved.
+    if (QWidget *w = m_controlStack->currentWidget()) {
+        if (QLayout *l = w->layout())
+            l->invalidate();
+        m_controlStack->setFixedHeight(w->sizeHint().height());
+    }
 }
 
 // ── Group switch state synthesis ─────────────────────────────────────────────

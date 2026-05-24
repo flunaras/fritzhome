@@ -853,8 +853,17 @@ so it does not affect Clang builds).
 | `ui/chartSlider`           | Time-window combo index (0–8)                  |
 | `ui/chartTab`              | Name of the last-active chart tab (restored on device switch) |
 | `ui/energyResIdx`          | Energy History resolution combo index (0 = Last 24 h, 1 = Rolling month, 2 = Last 2 years) |
+| `connections/<user>@<host>/expandedGroups` | List of group labels expanded in the device tree for this Fritz!Box (persisted only after successful login; restored on next login to the same `(username, host)` pair) |
+| `connections/<user>@<host>/selectedAin`    | AIN of the device selected in the tree for this Fritz!Box (persisted only after successful login; restored on next login) |
 
 Password is never persisted.
+
+The `connections/<user>@<host>/*` keys use sanitised user and host strings
+(`/` and `\` replaced with `_`) so they remain valid QSettings groups regardless
+of the original credentials. The state is only saved once `m_loginSucceeded` is
+set, which prevents a failed-login session from wiping a previously good
+snapshot. `MainWindow::configure()` flushes the previous connection's state
+before switching identities, so per-Fritz!Box snapshots stay isolated.
 
 ---
 
