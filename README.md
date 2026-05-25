@@ -8,7 +8,7 @@ Communicates directly with the Fritz!Box router over the local network using the
 
 ## Features
 
-- **Real-time device dashboard** with a two-panel split view: grouped device tree on the left, live control panel and charts on the right
+- **Real-time device dashboard** with a dockable three-panel layout: device tree, device control panel, and charts — each panel is an independently floatable/hideable `QDockWidget`; layout and visibility are persisted across restarts
 - **Controls all Fritz!DECT and Fritz!Smart Home device types:**
 
   | Device type | Controls |
@@ -31,7 +31,7 @@ Communicates directly with the Fritz!Box router over the local network using the
 - **Efficient network usage** — response caching (TTL-based) and request deduplication minimise traffic to the Fritz!Box
 - **Automatic login** — optional checkbox in the Connect dialog; skips the dialog on next launch if stored credentials are available
 - **Secure password storage** via KWallet (KDE) or libsecret/GNOME keyring
-- **Persistent UI state** — window geometry, splitter and column widths, chart slider position, and zoom level survive restarts
+- **Persistent UI state** — window geometry, dock layout, column widths, chart slider position, and zoom level survive restarts
 - **CLI flags** for unattended / scripted startup (`--host`, `--username`, `--password`, `--interval`)
 - **German (de) translation** included — KF builds use KI18n `.po`/`.mo`; no-KF builds use a compiled `.qm` resource
 
@@ -177,6 +177,8 @@ Options:
 ```
 
 Without `--password`, a login dialog is shown at startup. Credentials are stored securely in the system keyring (KWallet or GNOME/KDE Secret Service) and pre-filled on subsequent launches. The dialog also provides an **"Ignore TLS certificate warnings"** checkbox for Fritz!Box installations that use a self-signed HTTPS certificate.
+
+The three panels (device list, device control, charts) are dockable and can be floated, hidden, or rearranged via the **View** menu (`Ctrl+D` device list, `Ctrl+P` device control, `Ctrl+H` charts). Layout state is saved automatically.
 
 ---
 

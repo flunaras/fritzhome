@@ -22,24 +22,30 @@ class ChartWidget;
 class LocalGroupManager;
 class QTreeView;
 class QStackedWidget;
-class QSplitter;
+class QDockWidget;
 class QLabel;
 class QSpinBox;
 
 /**
  * MainWindow is the top-level application window for Fritz!Box Smart Home.
  *
- * Layout:
- *   ┌──────────────────────────────────────────┐
- *   │  MenuBar  /  ToolBar                     │
- *   ├──────────────┬───────────────────────────┤
- *   │              │  Device control panel     │
- *   │ Device list  │  (stacked per type)       │
- *   │ (QTreeView)  ├───────────────────────────┤
- *   │              │  Charts (ChartWidget)     │
- *   └──────────────┴───────────────────────────┘
- *   │  Status bar                              │
- *   └──────────────────────────────────────────┘
+ *   Layout:
+ *   ┌────────────────────────────────────────────────────────┐
+ *   │  MenuBar                                               │
+ *   ├──────────────┬──────────────────┬──────────────────────┤
+ *   │              │  Device control  │                      │
+ *   │ Device list  │  panel (stacked  │  Charts              │
+ *   │ (dockable)   │  per type)       │  (dockable)          │
+ *   │              │  (dockable)      │                      │
+ *   └──────────────┴──────────────────┴──────────────────────┘
+ *   │  Status bar                                            │
+ *   └────────────────────────────────────────────────────────┘
+ *
+ * All three panels are hosted in QDockWidgets and can be docked, floated,
+ * or hidden.  Visibility is toggled exclusively via the View menu (the
+ * QMainWindow right-click context menu is suppressed by overriding
+ * createPopupMenu()).  All positions and visibility are persisted via
+ * QMainWindow::saveState().
  */
 #if HAVE_KF
 class MainWindow : public KXmlGuiWindow
@@ -82,8 +88,8 @@ private slots:
 private:
     void setupActions();
     void setupStatusBar();
-    void setupDeviceTree(QSplitter *splitter);
-    void setupControlPanel(QSplitter *splitter);
+    void setupDeviceTree();
+    void setupControlPanel();
     void wireSignals();
     void restoreSettings();
     void updateDevicePanel(const FritzDevice &device);
@@ -96,6 +102,9 @@ private:
                                               QSet<QString> &seenAins) const;
     void closeEvent(QCloseEvent *event) override;
     void showEvent(QShowEvent *event) override;
+    /// Override to suppress the QMainWindow right-click context menu on dock
+    /// title bars; the View menu provides proper named toggle actions instead.
+    QMenu *createPopupMenu() override { return nullptr; }
 
     /// Persist producer/consumer status for a device and rebuild charts.
     /// Called from device widget producerStatusChanged signals.
@@ -139,14 +148,18 @@ private:
     FritzDeviceList    m_lastFritzDevices;  ///< last device list for local group synthesis
 
     // UI
-    QSplitter      *m_splitter       = nullptr;
-    QTreeView      *m_deviceTree     = nullptr;
+    QDockWidget    *m_deviceDock      = nullptr;
+    QDockWidget    *m_controlDock     = nullptr;
+    QDockWidget    *m_chartDock       = nullptr;
+    QTreeView      *m_deviceTree      = nullptr;
     QSpinBox       *m_intervalSpin   = nullptr;
     QStackedWidget *m_controlStack   = nullptr;
-    ChartWidget    *m_chartWidget    = nullptr;
-    QLabel         *m_statusLabel     = nullptr;
-    QLabel         *m_deviceIconLabel = nullptr;  ///< icon shown left of the device name heading
-    QLabel         *m_deviceNameLabel = nullptr;
+     ChartWidget    *m_chartWidget    = nullptr;
+     QLabel         *m_statusLabel     = nullptr;
+     QLabel         *m_deviceIconLabel = nullptr;  ///< icon shown left of the device name heading (control dock)
+     QLabel         *m_deviceNameLabel = nullptr;
+     QLabel         *m_chartIconLabel  = nullptr;  ///< icon shown left of the device name heading (chart dock)
+     QLabel         *m_chartNameLabel  = nullptr;
 
     // Track which device is selected (for refreshing the panel)
     QString         m_selectedAin;
@@ -184,4 +197,6 @@ private:
     QString     m_pendingSelectedAin;
     /// True while we are waiting to apply the restored tree state.
     bool        m_pendingTreeRestore = false;
+    /// True once dock/geometry state has been restored on the first show event.
+    bool        m_windowStateRestored = false;
 };

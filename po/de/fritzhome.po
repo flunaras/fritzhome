@@ -52,6 +52,27 @@ msgstr "Abfrageintervall in Sekunden (Standard: 10)"
 msgid "&File"
 msgstr "&Datei"
 
+msgid "&View"
+msgstr "&Ansicht"
+
+msgid "Devices"
+msgstr "Geräte"
+
+msgid "Device Control"
+msgstr "Gerätesteuerung"
+
+msgid "Device Charts"
+msgstr "Gerätediagramme"
+
+msgid "Show &Device List"
+msgstr "Geräteliste &anzeigen"
+
+msgid "Show Device &Control"
+msgstr "Geräte&steuerung anzeigen"
+
+msgid "Show &Device Charts"
+msgstr "Geräte&diagramme anzeigen"
+
 msgid "&Connect…"
 msgstr "&Verbinden …"
 

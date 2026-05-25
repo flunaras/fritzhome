@@ -63,6 +63,34 @@
         <translation>&amp;Datei</translation>
     </message>
     <message>
+        <source>&amp;View</source>
+        <translation>&amp;Ansicht</translation>
+    </message>
+    <message>
+        <source>Devices</source>
+        <translation>Geräte</translation>
+    </message>
+    <message>
+        <source>Device Control</source>
+        <translation>Gerätesteuerung</translation>
+    </message>
+    <message>
+        <source>Device Charts</source>
+        <translation>Gerätediagramme</translation>
+    </message>
+    <message>
+        <source>Show &amp;Device List</source>
+        <translation>Geräteliste &amp;anzeigen</translation>
+    </message>
+    <message>
+        <source>Show Device &amp;Control</source>
+        <translation>Geräte&amp;steuerung anzeigen</translation>
+    </message>
+    <message>
+        <source>Show &amp;Device Charts</source>
+        <translation>Geräte&amp;diagramme anzeigen</translation>
+    </message>
+    <message>
         <source>&amp;Connect…</source>
         <translation>&amp;Verbinden …</translation>
     </message>

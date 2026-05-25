@@ -104,89 +104,107 @@ FritzDevice                     (`group` = Fritz!Box hardware group; `localGroup
 
 ## Window Layout
 
+The application uses a **three-dock layout** — each panel is a `QDockWidget` that can be
+floated, hidden, or rearranged independently:
+
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │  MenuBar:  File > Connect… | Refresh | Quit                             │
-├────────────────────────┬────────────────────────────────────────────────┤
-│                        │  [icon 32x32]  Device Name  (bold, large)      │
-│  QTreeView             ├────────────────────────────────────────────────┤
-│  (m_deviceTree)        │  QStackedWidget (m_controlStack)               │
-│                        │   index 0: "Select a device…" placeholder      │
-│  Root level:           │   index 1: SwitchWidget        (in QScrollArea)│
-│   ▶ Smart Plugs  (3)   │   index 2: ThermostatWidget    (in QScrollArea)│
-│   ▼ Thermostats  (2)   │   index 3: EnergyWidget        (in QScrollArea)│
-│     • Living Room      │   index 4: DimmerWidget        (in QScrollArea)│
-│     • Bedroom          │   index 5: BlindWidget         (in QScrollArea)│
-│   ▶ Blinds       (1)   │   index 6: ColorWidget         (in QScrollArea)│
-│   ▶ Color Bulbs  (2)   │   index 7: HumiditySensorWidget(in QScrollArea)│
-│   ...                  │   index 8: AlarmWidget         (in QScrollArea)│
-├────────────────────────┤                                                │
-│  Refresh interval: [▲] ├────────────────────────────────────────────────┤
-│  spinbox (2–300 s)     │  ChartWidget (m_chartWidget)                   │
-│                        │   QTabWidget:                                  │
-│                        │    • Temperature  (QChartView + time-window    │
-│                        │                   combo overlay, top-left)     │
-│                        │    • Power        (QChartView + time-window    │
-│                        │                   combo overlay, top-left)     │
-│                        │    • Humidity     (QChartView)                 │
-│                        │    • Energy       (gauge labels + optional    │
-│                        │                   per-member pie chart)       │
-│                        │    • Energy History (bar chart + resolution    │
-│                        │                     combo box)                 │
-├────────────────────────┴────────────────────────────────────────────────┤
+│            View > Show &Device List (Ctrl+D)                            │
+│                  Show Device &Control (Ctrl+P)                          │
+│                  Show &Charts (Ctrl+H)                                  │
+│            Tools > Manage Local Groups…                                 │
+├──────────────────┬──────────────────────┬───────────────────────────────┤
+│ "Devices" dock   │ "Device Control" dock│ "Charts" dock                 │
+│ (m_deviceDock)   │ (m_controlDock)      │ (m_chartDock)                 │
+│                  │                      │                               │
+│  QTreeView       │  [icon 32x32]        │  ChartWidget (m_chartWidget)  │
+│  (m_deviceTree)  │  Device Name         │   QTabWidget:                 │
+│                  │  (bold, large)       │    • Temperature              │
+│  Root level:     │                      │    • Power                    │
+│   ▶ Smart Plugs  │  QStackedWidget      │    • Humidity                 │
+│   ▼ Thermostats  │  (m_controlStack)    │    • Energy                   │
+│     • Living Rm  │   index 0: placeholder│   • Energy History           │
+│     • Bedroom    │   index 1: Switch    │                               │
+│   ▶ Blinds       │   index 2: Thermostat│                               │
+│   ▶ Color Bulbs  │   …                  │                               │
+│   ...            │                      │                               │
+├──────────────────┤                      │                               │
+│  Refresh interval│                      │                               │
+│  spinbox (2–300s)│                      │                               │
+├──────────────────┴──────────────────────┴───────────────────────────────┤
 │  StatusBar:  m_statusLabel  (connection / error messages)               │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-The left/right panels are separated by a `QSplitter` (horizontal).  
-The left panel (`leftPanel`) contains the `QTreeView` and a "Refresh interval" `QSpinBox` row below it.  
-Default sizes: left 340 px, right 760 px.
+**Dock setup:**
+- All three docks are initially placed in `Qt::LeftDockWidgetArea`.
+- `setDockNestingEnabled(true)` enables horizontal splitting between docks.
+- `splitDockWidget(m_deviceDock, m_controlDock, Qt::Horizontal)` and
+  `splitDockWidget(m_controlDock, m_chartDock, Qt::Horizontal)` establish the
+  default side-by-side arrangement on first launch.
+- The central widget is a zero-size `QWidget` placeholder (`setMaximumSize(0,0)`);
+  all visible content lives in the three docks.
+- `createPopupMenu()` is overridden to return `nullptr`, suppressing the
+  `QMainWindow`-generated right-click context menu on dock title bars. The View
+  menu is the sole dock-visibility toggle mechanism.
+- Layout state (dock positions, sizes, visibility) is persisted via
+  `QMainWindow::saveState()` / `restoreState()` under `QSettings` key `ui/windowState`.
 
 ---
 
 ## Qt Object Hierarchy (runtime parent tree)
 
 ```
-MainWindow  (QMainWindow)
-├── QSplitter  (m_splitter, central widget child)
-│   ├── QWidget  (leftPanel)                      — left panel
-│   │   ├── QTreeView  (m_deviceTree)
-│   │   └── QHBoxLayout  (intervalRow)
-│   │       ├── QLabel  "Refresh interval:"
-│   │       └── QSpinBox  (m_intervalSpin, 2–300 s)
-│   └── QWidget  (rightPanel)
+MainWindow  (QMainWindow / KXmlGuiWindow)
+├── QDockWidget  (m_deviceDock, "Devices")
+│   └── QWidget  (dock content)
+│       ├── QTreeView  (m_deviceTree)
+│       └── QHBoxLayout  (intervalRow)
+│           ├── QLabel  "Refresh interval:"
+│           └── QSpinBox  (m_intervalSpin, 2–300 s)
+├── QDockWidget  (m_controlDock, "Device Control")
+│   └── QWidget  (dock content)
 │       ├── QLabel  (m_deviceIconLabel)    — 32×32 device heading icon
 │       ├── QLabel  (m_deviceNameLabel)    — device name heading
-│       ├── QStackedWidget  (m_controlStack)
-│       │   ├── [0] QLabel  "Select a device…"
-│       │   ├── [1] QScrollArea → SwitchWidget
-│       │   ├── [2] QScrollArea → ThermostatWidget
-│       │   ├── [3] QScrollArea → EnergyWidget
-│       │   ├── [4] QScrollArea → DimmerWidget
-│       │   ├── [5] QScrollArea → BlindWidget
-│       │   ├── [6] QScrollArea → ColorWidget
-│       │   ├── [7] QScrollArea → HumiditySensorWidget
-│       │   └── [8] QScrollArea → AlarmWidget
-│       └── ChartWidget  (m_chartWidget)
-│           ├── QTabWidget  (m_tabs)
-│           │   ├── Tab "Temperature"  → QChartView
-│           │   ├── Tab "Power"        → QChartView
-│           │   ├── Tab "Humidity"     → QChartView
-│           │   ├── Tab "Energy"       → QWidget (outer panel, grey background)
-│           │   │                         └── QWidget (inner, white background)
-│           │   │                              ├── QLabel (gauge labels: kWh, W, V)
-│           │   │                              └── QChartView (m_groupEnergyPieView, optional pie chart)
-│           │   └── Tab "Energy History" (index m_energyHistoryTabIndex)
-│           │       ├── QComboBox  (m_energyResCombo)
-│           │       └── QChartView
-│           └── QComboBox / QLabel  (m_windowCombo / m_windowComboTemp + caption)
-│               — direct children of the chartStack widget inside each Temperature/Power
-│               chart tab, positioned absolutely via a ResizeFilter event filter
+│       └── QStackedWidget  (m_controlStack)
+│           ├── [0] QLabel  "Select a device…"
+│           ├── [1] QScrollArea → SwitchWidget
+│           ├── [2] QScrollArea → ThermostatWidget
+│           ├── [3] QScrollArea → EnergyWidget
+│           ├── [4] QScrollArea → DimmerWidget
+│           ├── [5] QScrollArea → BlindWidget
+│           ├── [6] QScrollArea → ColorWidget
+│           ├── [7] QScrollArea → HumiditySensorWidget
+│           └── [8] QScrollArea → AlarmWidget
+├── QDockWidget  (m_chartDock, "Charts")
+│   └── ChartWidget  (m_chartWidget)
+│       ├── QTabWidget  (m_tabs)
+│       │   ├── Tab "Temperature"  → QChartView
+│       │   ├── Tab "Power"        → QChartView
+│       │   ├── Tab "Humidity"     → QChartView
+│       │   ├── Tab "Energy"       → QWidget (outer panel, grey background)
+│       │   │                         └── QWidget (inner, white background)
+│       │   │                              ├── QLabel (gauge labels: kWh, W, V)
+│       │   │                              └── QChartView (m_groupEnergyPieView, optional pie chart)
+│       │   └── Tab "Energy History" (index m_energyHistoryTabIndex)
+│       │       ├── QComboBox  (m_energyResCombo)
+│       │       └── QChartView
+│       └── QComboBox / QLabel  (m_windowCombo / m_windowComboTemp + caption)
+│           — direct children of the chartStack widget inside each Temperature/Power
+│           chart tab, positioned absolutely via a ResizeFilter event filter
+├── QWidget  (central widget placeholder, zero size)
 ├── QMenuBar
-│   └── QMenu  "&File"
-│       ├── QAction  "Connect…"
-│       ├── QAction  "Refresh"
-│       └── QAction  "Quit"
+│   ├── QMenu  "&File"
+│   │   ├── QAction  "Connect…"
+│   │   ├── QAction  "Refresh"
+│   │   └── QAction  "Quit"
+│   ├── QMenu  "&View"
+│   │   ├── QAction  "Show &Device List"   (Ctrl+D, toggleViewAction of m_deviceDock)
+│   │   ├── QAction  "Show Device &Control" (Ctrl+P, toggleViewAction of m_controlDock)
+│   │   └── QAction  "Show &Charts"         (Ctrl+H, toggleViewAction of m_chartDock)
+│   └── QMenu  "&Tools"
+│       └── QAction  "Manage &Local Groups…"
 ├── QStatusBar
 │   └── QLabel  (m_statusLabel)
 ├── FritzApi  (m_api)                      — QObject, not a widget

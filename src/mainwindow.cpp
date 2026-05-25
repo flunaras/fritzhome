@@ -13,7 +13,7 @@
 
 #include <QAction>
 #include <QApplication>
-#include <QSplitter>
+#include <QDockWidget>
 #include <QTreeView>
 #include <QStackedWidget>
 #include <QHeaderView>
@@ -94,23 +94,24 @@ MainWindow::MainWindow(QWidget *parent)
                                    QIcon(QStringLiteral(":/icons/fritzhome.svg"))));
     resize(1100, 680);
 
-    // ── Central widget ────────────────────────────────────────────────────────
-    QWidget *central = new QWidget(this);
-    QVBoxLayout *centralLayout = new QVBoxLayout(central);
-    centralLayout->setContentsMargins(0, 0, 0, 0);
-    centralLayout->setSpacing(0);
+    // Allow dock widgets to be split both horizontally and vertically by
+    // dragging them beside each other (not just stacking them).
+    setDockNestingEnabled(true);
 
-    m_splitter = new QSplitter(Qt::Horizontal, central);
+    // ── Dock widgets ──────────────────────────────────────────────────────────
+    // Create all three docks first (each addDockWidget call places them), then
+    // use splitDockWidget() to establish the default side-by-side layout:
+    //   [ Devices | Device Control | Device Charts ]
+    // This only applies on first launch; saveState()/restoreState() takes over
+    // for subsequent sessions.
+    setupDeviceTree();    // m_deviceDock  — placed in LeftDockWidgetArea
+    setupControlPanel();  // m_controlDock — initially also Left, then split right
+                          // m_chartDock   — initially also Left, then split right of control
 
-    setupDeviceTree(m_splitter);
-    setupControlPanel(m_splitter);
-
-    m_splitter->setStretchFactor(0, 0);
-    m_splitter->setStretchFactor(1, 1);
-    m_splitter->setSizes({340, 760});
-
-    centralLayout->addWidget(m_splitter);
-    setCentralWidget(central);
+    // Default layout: split control panel to the right of the device list,
+    // then split chart dock to the right of the control panel.
+    splitDockWidget(m_deviceDock,  m_controlDock, Qt::Horizontal);
+    splitDockWidget(m_controlDock, m_chartDock,   Qt::Horizontal);
 
     setupStatusBar();
     setupActions();
@@ -126,14 +127,14 @@ MainWindow::~MainWindow() = default;
 
 // ── Constructor helpers ───────────────────────────────────────────────────────
 
-void MainWindow::setupDeviceTree(QSplitter *splitter)
+void MainWindow::setupDeviceTree()
 {
-    QWidget *leftPanel = new QWidget(splitter);
-    QVBoxLayout *leftLayout = new QVBoxLayout(leftPanel);
+    QWidget *treeContainer = new QWidget(this);
+    QVBoxLayout *leftLayout = new QVBoxLayout(treeContainer);
     leftLayout->setContentsMargins(0, 0, 0, 0);
     leftLayout->setSpacing(4);
 
-    m_deviceTree = new QTreeView(leftPanel);
+    m_deviceTree = new QTreeView(treeContainer);
     m_deviceTree->setModel(m_model);
     m_deviceTree->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_deviceTree->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -143,7 +144,7 @@ void MainWindow::setupDeviceTree(QSplitter *splitter)
     m_deviceTree->setItemsExpandable(true);
     m_deviceTree->setUniformRowHeights(false);
     m_deviceTree->setSortingEnabled(false);  // no proxy model, keep insertion order
-     m_deviceTree->setMinimumWidth(320);
+     m_deviceTree->setMinimumWidth(220);
      m_deviceTree->header()->setSectionResizeMode(QHeaderView::Interactive);
      m_deviceTree->header()->setMinimumSectionSize(50);
      leftLayout->addWidget(m_deviceTree, 1);
@@ -151,8 +152,8 @@ void MainWindow::setupDeviceTree(QSplitter *splitter)
     // Polling interval row below the tree
     QHBoxLayout *intervalRow = new QHBoxLayout();
     intervalRow->setContentsMargins(4, 2, 4, 2);
-    QLabel *intervalLabel = new QLabel(i18n("Refresh interval:"), leftPanel);
-    m_intervalSpin = new QSpinBox(leftPanel);
+    QLabel *intervalLabel = new QLabel(i18n("Refresh interval:"), treeContainer);
+    m_intervalSpin = new QSpinBox(treeContainer);
     m_intervalSpin->setRange(2, 300);
     m_intervalSpin->setValue(m_pollingInterval);
     m_intervalSpin->setSuffix(i18n(" s"));
@@ -161,23 +162,35 @@ void MainWindow::setupDeviceTree(QSplitter *splitter)
     intervalRow->addWidget(m_intervalSpin, 1);
     leftLayout->addLayout(intervalRow);
 
-    splitter->addWidget(leftPanel);
+    // Wrap the tree panel in a dock widget so the user can float, move, or hide it.
+    m_deviceDock = new QDockWidget(i18n("Devices"), this);
+    m_deviceDock->setObjectName(QStringLiteral("DeviceListDock")); // required for saveState()
+    m_deviceDock->setWidget(treeContainer);
+    m_deviceDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea
+                                  | Qt::TopDockWidgetArea);
+    m_deviceDock->setFeatures(QDockWidget::DockWidgetMovable
+                              | QDockWidget::DockWidgetFloatable
+                              | QDockWidget::DockWidgetClosable);
+    addDockWidget(Qt::LeftDockWidgetArea, m_deviceDock);
 }
 
-void MainWindow::setupControlPanel(QSplitter *splitter)
+void MainWindow::setupControlPanel()
 {
-    QWidget *rightPanel = new QWidget(splitter);
-    QVBoxLayout *rightLayout = new QVBoxLayout(rightPanel);
-    rightLayout->setContentsMargins(4, 4, 4, 4);
-    rightLayout->setSpacing(6);
+    // ── Device control dock ───────────────────────────────────────────────────
+    // The heading (icon + device name) and the stacked device-type panels
+    // are hosted in a dockable widget so the user can float or hide them.
+    QWidget *controlContainer = new QWidget(this);
+    QVBoxLayout *controlLayout = new QVBoxLayout(controlContainer);
+    controlLayout->setContentsMargins(4, 4, 4, 4);
+    controlLayout->setSpacing(6);
 
     // Device name heading (icon + text in a horizontal row)
-    m_deviceIconLabel = new QLabel(rightPanel);
+    m_deviceIconLabel = new QLabel(controlContainer);
     m_deviceIconLabel->setFixedSize(32, 32);
     m_deviceIconLabel->setAlignment(Qt::AlignCenter);
     m_deviceIconLabel->hide();
 
-    m_deviceNameLabel = new QLabel(rightPanel);
+    m_deviceNameLabel = new QLabel(controlContainer);
     m_deviceNameLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     {
         QFont f = m_deviceNameLabel->font();
@@ -193,10 +206,10 @@ void MainWindow::setupControlPanel(QSplitter *splitter)
     nameRow->setSpacing(6);
     nameRow->addWidget(m_deviceIconLabel);
     nameRow->addWidget(m_deviceNameLabel, 1);
-    rightLayout->addLayout(nameRow);
+    controlLayout->addLayout(nameRow);
 
     // Control stack
-    m_controlStack = new QStackedWidget(rightPanel);
+    m_controlStack = new QStackedWidget(controlContainer);
 
     // 0: empty placeholder
     QLabel *emptyLabel = new QLabel(i18n("Select a device from the list."), m_controlStack);
@@ -224,21 +237,77 @@ void MainWindow::setupControlPanel(QSplitter *splitter)
     addScrolled(new HumiditySensorWidget(m_api, m_controlStack));       // 7
     addScrolled(new AlarmWidget(m_api, m_controlStack));                // 8
 
-    m_controlStack->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
-    // Always size to the current page only, not to the tallest page.
-    connect(m_controlStack, &QStackedWidget::currentChanged, this, [this](int) {
-        if (QWidget *w = m_controlStack->currentWidget())
-            m_controlStack->setFixedHeight(w->sizeHint().height());
-    });
-    rightLayout->addWidget(m_controlStack, 0);
+    m_controlStack->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
+    // No fixed-height pinning needed — the dock widget manages vertical sizing.
+    // (The old QSizePolicy::Fixed + setFixedHeight() approach was for a splitter
+    // layout where we wanted the control panel to shrink-wrap; with docks the
+    // user resizes the dock itself.)
+    controlLayout->addWidget(m_controlStack);
+    // Fill any remaining vertical space so the dock looks clean when floating.
+    controlLayout->addStretch(1);
 
-    // Charts
-    m_chartWidget = new ChartWidget(rightPanel);
-    m_chartWidget->setMinimumHeight(300);
+    m_controlDock = new QDockWidget(i18n("Device Control"), this);
+    m_controlDock->setObjectName(QStringLiteral("DeviceControlDock")); // required for saveState()
+    m_controlDock->setWidget(controlContainer);
+    m_controlDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea
+                                   | Qt::TopDockWidgetArea | Qt::BottomDockWidgetArea);
+    m_controlDock->setFeatures(QDockWidget::DockWidgetMovable
+                               | QDockWidget::DockWidgetFloatable
+                               | QDockWidget::DockWidgetClosable);
+    addDockWidget(Qt::LeftDockWidgetArea, m_controlDock);
+
+    // ── Charts dock ───────────────────────────────────────────────────────────
+    // The chart area is also dockable so the user can float, resize, or hide it.
+    // It uses the same icon + name header pattern as the control dock so the
+    // selected device is always identified in both panels.
+    QWidget     *chartContainer = new QWidget(this);
+    QVBoxLayout *chartLayout    = new QVBoxLayout(chartContainer);
+    chartLayout->setContentsMargins(4, 4, 4, 4);
+    chartLayout->setSpacing(6);
+
+    m_chartIconLabel = new QLabel(chartContainer);
+    m_chartIconLabel->setFixedSize(32, 32);
+    m_chartIconLabel->setAlignment(Qt::AlignCenter);
+    m_chartIconLabel->hide();
+
+    m_chartNameLabel = new QLabel(chartContainer);
+    m_chartNameLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    {
+        QFont f = m_chartNameLabel->font();
+        f.setPointSize(f.pointSize() + 3);
+        f.setBold(true);
+        m_chartNameLabel->setFont(f);
+    }
+    m_chartNameLabel->setContentsMargins(4, 2, 4, 2);
+    m_chartNameLabel->hide();
+
+    QHBoxLayout *chartNameRow = new QHBoxLayout();
+    chartNameRow->setContentsMargins(0, 0, 0, 0);
+    chartNameRow->setSpacing(6);
+    chartNameRow->addWidget(m_chartIconLabel);
+    chartNameRow->addWidget(m_chartNameLabel, 1);
+    chartLayout->addLayout(chartNameRow);
+
+    m_chartWidget = new ChartWidget(chartContainer);
+    m_chartWidget->setMinimumHeight(200);
     m_chartWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    rightLayout->addWidget(m_chartWidget, 1);
+    chartLayout->addWidget(m_chartWidget);
 
-    splitter->addWidget(rightPanel);
+    m_chartDock = new QDockWidget(i18n("Device Charts"), this);
+    m_chartDock->setObjectName(QStringLiteral("ChartsDock")); // required for saveState()
+    m_chartDock->setWidget(chartContainer);
+    m_chartDock->setAllowedAreas(Qt::AllDockWidgetAreas);
+    m_chartDock->setFeatures(QDockWidget::DockWidgetMovable
+                             | QDockWidget::DockWidgetFloatable
+                             | QDockWidget::DockWidgetClosable);
+    addDockWidget(Qt::LeftDockWidgetArea, m_chartDock);
+
+    // The central widget is a plain empty placeholder — all content lives in
+    // docks.  Setting it prevents Qt from using an internal QWidget that would
+    // waste space between the dock areas.
+    QWidget *placeholder = new QWidget(this);
+    placeholder->setMaximumSize(0, 0); // collapse to nothing
+    setCentralWidget(placeholder);
 }
 
 void MainWindow::wireSignals()
@@ -368,12 +437,10 @@ void MainWindow::wireSignals()
 void MainWindow::restoreSettings()
 {
     QSettings s;
-    if (s.contains(QStringLiteral("ui/geometry")))
-        restoreGeometry(s.value(QStringLiteral("ui/geometry")).toByteArray());
-    if (s.contains(QStringLiteral("ui/windowState")))
-        restoreState(s.value(QStringLiteral("ui/windowState")).toByteArray());
-    if (s.contains(QStringLiteral("ui/splitterState")))
-        m_splitter->restoreState(s.value(QStringLiteral("ui/splitterState")).toByteArray());
+    // Geometry and dock state are deferred to the first showEvent so that
+    // restoreState() sees the real window size and can scale dock widths
+    // correctly.  Only non-layout settings are loaded here.
+
     // Restore saved polling interval into spinbox (block signal so we don't
     // call startPolling before login completes).
     const int savedInterval = s.value(QStringLiteral("connection/interval"), 10).toInt();
@@ -389,9 +456,8 @@ void MainWindow::closeEvent(QCloseEvent *event)
 {
     // Save all UI layout state before closing
     QSettings s;
-    s.setValue(QStringLiteral("ui/geometry"),      saveGeometry());
-    s.setValue(QStringLiteral("ui/windowState"),   saveState());
-    s.setValue(QStringLiteral("ui/splitterState"), m_splitter->saveState());
+    s.setValue(QStringLiteral("ui/geometry"),    saveGeometry());
+    s.setValue(QStringLiteral("ui/windowState"), saveState());
     // Only persist the tree header state if the columns were actually sized
     // for real device data this session.  If the app started offline (no
     // device list ever arrived), initColumnSizes() never ran, the tree still
@@ -420,10 +486,32 @@ void MainWindow::closeEvent(QCloseEvent *event)
 void MainWindow::showEvent(QShowEvent *event)
 {
 #if HAVE_KF
-    KXmlGuiWindow::showEvent(event);
+    // Do NOT call KXmlGuiWindow::showEvent() — that triggers
+    // applyMainWindowSettings() which reads dock state from KConfig,
+    // overwriting our QSettings-based restore.
+    QMainWindow::showEvent(event);
 #else
     QMainWindow::showEvent(event);
 #endif
+
+    // Restore geometry + dock state on the first show only.
+    // restoreGeometry() runs immediately; restoreState() is deferred via
+    // singleShot(0) so it runs after Qt has finished the initial layout pass
+    // triggered by restoreGeometry().  Without the deferral the layout pass
+    // that follows restoreGeometry() resets dock widths to their default
+    // proportions, overwriting what restoreState() just set.
+    if (!m_windowStateRestored) {
+        m_windowStateRestored = true;
+        QSettings s;
+        if (s.contains(QStringLiteral("ui/geometry")))
+            restoreGeometry(s.value(QStringLiteral("ui/geometry")).toByteArray());
+        if (s.contains(QStringLiteral("ui/windowState"))) {
+            const QByteArray state = s.value(QStringLiteral("ui/windowState")).toByteArray();
+            QTimer::singleShot(0, this, [this, state]() {
+                restoreState(state);
+            });
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -540,24 +628,60 @@ void MainWindow::setupActions()
         i18n("Manage &Local Groups…"), this);
     connect(localGroupsAction, &QAction::triggered, this, &MainWindow::actionManageLocalGroups);
 
+    // View > Show Device List  (toggle dock visibility)
+    QAction *showDeviceDockAction = m_deviceDock->toggleViewAction();
+    showDeviceDockAction->setText(i18n("Show &Device List"));
+    showDeviceDockAction->setIcon(QIcon::fromTheme(QStringLiteral("view-list-tree")));
+#if !HAVE_KF
+    showDeviceDockAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_D));
+#endif
+
+    // View > Show Device Control  (toggle dock visibility)
+    QAction *showControlDockAction = m_controlDock->toggleViewAction();
+    showControlDockAction->setText(i18n("Show Device &Control"));
+    showControlDockAction->setIcon(QIcon::fromTheme(QStringLiteral("configure")));
+#if !HAVE_KF
+    showControlDockAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_P));
+#endif
+
+    // View > Show Device Charts  (toggle dock visibility)
+    QAction *showChartDockAction = m_chartDock->toggleViewAction();
+    showChartDockAction->setText(i18n("Show &Device Charts"));
+    showChartDockAction->setIcon(QIcon::fromTheme(QStringLiteral("office-chart-line")));
+#if !HAVE_KF
+    showChartDockAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_H));
+#endif
+
+    // The QMainWindow right-click context menu is suppressed by the
+    // createPopupMenu() override in mainwindow.h; no setContextMenuPolicy
+    // calls needed here.
+
 #if HAVE_KF
-    actionCollection()->addAction(QStringLiteral("file_connect"), connectAction);
-    actionCollection()->addAction(QStringLiteral("file_refresh"), refreshAction);
-    actionCollection()->addAction(QStringLiteral("tools_localgroups"), localGroupsAction);
-    // Assign shortcuts via KActionCollection so KXmlGui can save/restore them.
-    // Using QAction::setShortcut() directly triggers a kf.xmlgui warning.
-    actionCollection()->setDefaultShortcut(connectAction, QKeySequence(Qt::CTRL | Qt::Key_L));
-    actionCollection()->setDefaultShortcut(refreshAction, QKeySequence::Refresh);
-    // Use our close()-based quit so closeEvent() runs on KStandardAction::Quit too.
+    actionCollection()->addAction(QStringLiteral("file_connect"),       connectAction);
+    actionCollection()->addAction(QStringLiteral("file_refresh"),       refreshAction);
+    actionCollection()->addAction(QStringLiteral("tools_localgroups"),  localGroupsAction);
+    actionCollection()->addAction(QStringLiteral("view_devicelist"),    showDeviceDockAction);
+    actionCollection()->addAction(QStringLiteral("view_devicecontrol"), showControlDockAction);
+    actionCollection()->addAction(QStringLiteral("view_charts"),        showChartDockAction);
+    actionCollection()->setDefaultShortcut(connectAction,          QKeySequence(Qt::CTRL | Qt::Key_L));
+    actionCollection()->setDefaultShortcut(refreshAction,          QKeySequence::Refresh);
+    actionCollection()->setDefaultShortcut(showDeviceDockAction,   QKeySequence(Qt::CTRL | Qt::Key_D));
+    actionCollection()->setDefaultShortcut(showControlDockAction,  QKeySequence(Qt::CTRL | Qt::Key_P));
+    actionCollection()->setDefaultShortcut(showChartDockAction,    QKeySequence(Qt::CTRL | Qt::Key_H));
     KStandardAction::quit(this, &MainWindow::close, actionCollection());
 
-    // setupGUI loads fritzhomeui.rc (found by KDE via app name) which defines
-    // the File menu order (Connect → Refresh → Separator → Quit) and no toolbar.
-    setupGUI(Keys | StatusBar | Save | Create);
+    // Omit the Save flag: dock/toolbar layout is persisted via our own
+    // QSettings-based saveState()/restoreState() in closeEvent/showEvent.
+    setupGUI(Keys | StatusBar | Create);
 
-    // KMainWindow may still create or restore a toolbar from saved session state
-    // even when the .rc file has no <ToolBar> block.  Remove all toolbars
-    // unconditionally so none ever appears, regardless of saved config.
+    // resetAutoSaveSettings() disables KMainWindow's automatic save/restore of
+    // window geometry and dock state via KConfig (fritzhomestaterc).  Without
+    // this, KMainWindow::closeEvent() still saves state to KConfig, and
+    // applyMainWindowSettings() (triggered internally by KMainWindow) restores
+    // it on next launch — overwriting the dock positions we restore from
+    // QSettings.  We own the full save/restore cycle via QSettings exclusively.
+    resetAutoSaveSettings();
+
     const auto toolbarList = toolBars();
     for (KToolBar *tb : toolbarList) {
         removeToolBar(tb);
@@ -570,6 +694,11 @@ void MainWindow::setupActions()
     fileMenu->addAction(refreshAction);
     fileMenu->addSeparator();
     fileMenu->addAction(quitAction);
+
+    QMenu *viewMenu = menuBar()->addMenu(i18n("&View"));
+    viewMenu->addAction(showDeviceDockAction);
+    viewMenu->addAction(showControlDockAction);
+    viewMenu->addAction(showChartDockAction);
 
     QMenu *toolsMenu = menuBar()->addMenu(i18n("&Tools"));
     toolsMenu->addAction(localGroupsAction);
@@ -813,6 +942,10 @@ void MainWindow::reselectDevice(const QString &ain)
             m_deviceIconLabel->show();
             m_deviceNameLabel->setText(dev.name);
             m_deviceNameLabel->show();
+            m_chartIconLabel->setPixmap(deviceHeadingPixmap(dev));
+            m_chartIconLabel->show();
+            m_chartNameLabel->setText(dev.name);
+            m_chartNameLabel->show();
 
             // Suppress the panel update if a switch command was recently
             // issued for this device/group and the Fritz!Box may still be
@@ -1138,6 +1271,8 @@ void MainWindow::onDeviceSelected(const QModelIndex &current, const QModelIndex 
         m_selectedAin.clear();
         m_deviceIconLabel->hide();
         m_deviceNameLabel->hide();
+        m_chartIconLabel->hide();
+        m_chartNameLabel->hide();
         return;
     }
 
@@ -1147,6 +1282,10 @@ void MainWindow::onDeviceSelected(const QModelIndex &current, const QModelIndex 
     m_deviceIconLabel->show();
     m_deviceNameLabel->setText(dev.name);
     m_deviceNameLabel->show();
+    m_chartIconLabel->setPixmap(deviceHeadingPixmap(dev));
+    m_chartIconLabel->show();
+    m_chartNameLabel->setText(dev.name);
+    m_chartNameLabel->show();
     updateDevicePanel(dev);
     const FritzDeviceList memberDevs = dev.isGroup() ? collectMemberDevices(dev) : FritzDeviceList();
     m_chartWidget->updateDevice(dev, memberDevs);
@@ -1204,20 +1343,8 @@ void MainWindow::updateDevicePanel(const FritzDevice &device)
         dw->setMembers(FritzDeviceList()); // clear any stale member menus
     }
 
-    // Refresh the stack's fixed height. The QStackedWidget::currentChanged
-    // handler fixes the height to the current page's sizeHint, but for a
-    // page being shown for the very first time (e.g. immediately after
-    // session restore) the inner widget's content has not yet been populated
-    // by updateDevice(), so its sizeHint is the bare-construction minimum.
-    // The resulting tiny fixed height makes the panel appear empty until the
-    // next selection change. Re-measure now that the widget has real data —
-    // updating only the height so the horizontal stretch from the parent
-    // layout is preserved.
-    if (QWidget *w = m_controlStack->currentWidget()) {
-        if (QLayout *l = w->layout())
-            l->invalidate();
-        m_controlStack->setFixedHeight(w->sizeHint().height());
-    }
+    // With dock-based layout, the dock manages the panel's vertical size.
+    // No need to pin the stack to a fixed height on device updates.
 }
 
 // ── Group switch state synthesis ─────────────────────────────────────────────
