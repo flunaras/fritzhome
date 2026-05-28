@@ -100,18 +100,23 @@ MainWindow::MainWindow(QWidget *parent)
 
     // ── Dock widgets ──────────────────────────────────────────────────────────
     // Create all three docks first (each addDockWidget call places them), then
-    // use splitDockWidget() to establish the default side-by-side layout:
-    //   [ Devices | Device Control | Device Charts ]
+    // use splitDockWidget() to establish the default layout:
+    //   [ Devices | Device Control ]
+    //             [ Device Charts  ]
     // This only applies on first launch; saveState()/restoreState() takes over
     // for subsequent sessions.
     setupDeviceTree();    // m_deviceDock  — placed in LeftDockWidgetArea
     setupControlPanel();  // m_controlDock — initially also Left, then split right
                           // m_chartDock   — initially also Left, then split right of control
 
-    // Default layout: split control panel to the right of the device list,
-    // then split chart dock to the right of the control panel.
+    // Default layout (first launch only — saveState/restoreState takes over for
+    // subsequent sessions):
+    //   [ Devices | Device Control ]
+    //             [ Device Charts  ]
+    // The device dock occupies the left column; the control dock and chart dock
+    // are stacked vertically in the right column, matching the reference layout.
     splitDockWidget(m_deviceDock,  m_controlDock, Qt::Horizontal);
-    splitDockWidget(m_controlDock, m_chartDock,   Qt::Horizontal);
+    splitDockWidget(m_controlDock, m_chartDock,   Qt::Vertical);
 
     setupStatusBar();
     setupActions();

@@ -122,7 +122,9 @@ void ChartWidget::updateDevice(const FritzDevice &device,
         activeTabText = plainTabText(m_tabs->tabText(m_tabs->currentIndex()));
     } else {
         QSettings s;
-        activeTabText = s.value(QStringLiteral("ui/chartTab")).toString();
+        // Default to "Energy History" on first launch (no saved tab yet).
+        activeTabText = s.value(QStringLiteral("ui/chartTab"),
+                                QStringLiteral("Energy History")).toString();
     }
 
     resetChartState(deviceChanged);
