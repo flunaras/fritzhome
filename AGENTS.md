@@ -687,6 +687,18 @@ Error: /usr/bin/aarch64-linux-gnu-gcc: cannot execute binary file
 - Docker image includes aarch64 cross-compiler toolchain pre-installed
 - Do NOT attempt manual cross-compilation without Docker
 
+**Symptom: Binary fails with "version `Qt_6.X_PRIVATE_API' not found"**
+```
+/lib64/libQt6Charts.so.6: version `Qt_6.11.0_PRIVATE_API' not found (required by fritzhome)
+```
+**Root cause:**
+- Qt6 Charts internally uses Qt private APIs, so any binary linking against it carries a version-pinned dependency on the exact Qt minor version it was compiled against
+- If the Docker build image was created before a Qt version bump in Tumbleweed, cached `zypper install` layers silently install an outdated Qt — the binary then mismatches the Qt libraries on the target system
+**Solution:**
+- `docker/build.sh` passes `--pull` to `docker build`, so the base image (`opensuse/tumbleweed:latest`) is always fetched fresh from the registry; when a new Tumbleweed snapshot ships a new Qt release, all subsequent `RUN zypper install` layers are invalidated and rebuilt with the updated packages
+- Simply rebuild: `./docker/build.sh --distro opensuse-tumbleweed-x86_64 --build-type Release`
+- Install via the RPM rather than copying the raw binary — the RPM dependency on `libQt6Charts6` ensures the matching Qt runtime is installed automatically
+
 **Symptom: "Git repository state is dirty; cannot build"**
 ```
 Warning: uncommitted changes in working tree; build may include local modifications

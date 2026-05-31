@@ -226,9 +226,17 @@ build_for_distro() {
     echo "════════════════════════════════════════════════════════════"
 
     # ── Step 1: Build (or update) the Docker image ────────────────────────────
+    # --pull ensures the base image (e.g. opensuse/tumbleweed:latest) is always
+    # fetched fresh from the registry.  When the upstream snapshot changes (e.g.
+    # a new Qt release lands in Tumbleweed), Docker invalidates all subsequent
+    # cached layers and re-runs every zypper install step with the updated
+    # packages.  Without --pull the base image — and therefore the installed Qt
+    # version — can silently stay at whatever was cached when the image was first
+    # built, causing the binary to mismatch the Qt libraries on the target system.
     echo ""
     echo "[1/4] Building Docker image '${image}' ..."
     docker build \
+        --pull \
         --file "${dockerfile}" \
         --tag  "${image}" \
         "${PROJECT_ROOT}"

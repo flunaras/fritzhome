@@ -26,6 +26,13 @@ RUN zypper --non-interactive install --no-recommends \
         tar \
         which
 
+# ── Remove busybox-gawk — conflicts with qt6-printsupport-devel (Qt 6.11+) ────
+# The base Tumbleweed image ships busybox-gawk; qt6-printsupport-devel (pulled
+# in by qt6-base-devel) provides gawk and conflicts with the busybox variant.
+# Remove it first so the subsequent Qt install can satisfy its own gawk dep.
+RUN zypper --non-interactive remove busybox-gawk && \
+    zypper --non-interactive install --no-recommends gawk
+
 # ── Qt6 development libraries ─────────────────────────────────────────────────
 RUN zypper --non-interactive install --no-recommends \
         qt6-base-devel \
