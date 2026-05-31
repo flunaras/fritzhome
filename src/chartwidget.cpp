@@ -22,6 +22,7 @@
 #include <QToolTip>
 #include <QHelpEvent>
 #include <QMouseEvent>
+#include <QResizeEvent>
 #include <QCoreApplication>
 #include <limits>
 #include <functional>
@@ -80,6 +81,21 @@ ChartWidget::ChartWidget(QWidget *parent)
 
 void ChartWidget::updateSliderVisibility()
 {
+}
+
+// ---------------------------------------------------------------------------
+// Resize event — re-apply time-window to pick up new pixel-aware tick counts
+// ---------------------------------------------------------------------------
+
+void ChartWidget::resizeEvent(QResizeEvent *event)
+{
+    QWidget::resizeEvent(event);
+    // Re-apply the time window so applyTimeAxisTicks and applyAxisRangeDynamic
+    // can read the updated plotArea dimensions and adjust tick density.
+    applyTimeWindow();
+    // The energy history bar chart is not driven by applyTimeWindow, so
+    // rescale its Y-axis separately.
+    m_historyBuilder.rescaleY();
 }
 
 // ---------------------------------------------------------------------------
@@ -603,17 +619,23 @@ void ChartWidget::applyTimeWindow()
 
     if (m_tempBuilder.m_tempAxisX) {
         m_tempBuilder.m_tempAxisX->setRange(minDt, maxDt);
-        applyTimeAxisTicks(m_tempBuilder.m_tempAxisX, winMs);
+        int pw = m_tempBuilder.m_tempChart
+            ? static_cast<int>(m_tempBuilder.m_tempChart->plotArea().width()) : 0;
+        applyTimeAxisTicks(m_tempBuilder.m_tempAxisX, winMs, pw);
         m_tempBuilder.rescaleYTemp(minMs, maxMs);
     }
     if (m_tempBuilder.m_groupTempAxisX) {
         m_tempBuilder.m_groupTempAxisX->setRange(minDt, maxDt);
-        applyTimeAxisTicks(m_tempBuilder.m_groupTempAxisX, winMs);
+        int pw = m_tempBuilder.m_groupTempChart
+            ? static_cast<int>(m_tempBuilder.m_groupTempChart->plotArea().width()) : 0;
+        applyTimeAxisTicks(m_tempBuilder.m_groupTempAxisX, winMs, pw);
         m_tempBuilder.rescaleYGroupTemp(minMs, maxMs);
     }
     if (m_powerBuilder.m_powerAxisX) {
         m_powerBuilder.m_powerAxisX->setRange(minDt, maxDt);
-        applyTimeAxisTicks(m_powerBuilder.m_powerAxisX, winMs);
+        int pw = m_powerBuilder.m_powerChart
+            ? static_cast<int>(m_powerBuilder.m_powerChart->plotArea().width()) : 0;
+        applyTimeAxisTicks(m_powerBuilder.m_powerAxisX, winMs, pw);
         m_powerBuilder.rescaleYPower(minMs, maxMs);
     }
 }

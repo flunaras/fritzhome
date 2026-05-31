@@ -86,6 +86,11 @@ public:
     /// Reset all pointers (called on device switch / teardown).
     void reset();
 
+    /// Re-apply Y-axis ticks using the current chart plot area height.
+    /// Called from ChartWidget::resizeEvent so the bar chart Y density adapts
+    /// to the window size just like the rolling power/temperature charts do.
+    void rescaleY();
+
     /// Null out widget pointers owned by a tab widget being deleted.
     void nullifyWidgetPointers(QWidget *w);
 
@@ -147,6 +152,9 @@ private:
     int         m_activeEnergyGrid       = 0;  ///< grid of currently displayed view (0 = none)
     QComboBox  *m_energyResCombo         = nullptr;
     QChartView *m_energyChartView        = nullptr;
+    QValueAxis *m_energyAxisY            = nullptr;  ///< Y-axis of the current bar chart
+    double      m_energyRawMin           = 0.0;      ///< raw Y min used to build current chart
+    double      m_energyRawMax           = 1.0;      ///< raw Y max used to build current chart
     DeviceBasicStats m_lastEnergyStats;        ///< latest stats (single-device mode)
     int         m_lastAvailableGrids     = 0;  ///< bitmask of available grids
 

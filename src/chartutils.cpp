@@ -133,9 +133,22 @@ void applyAxisRange(QValueAxis *axis, const AxisRange &r)
     axis->setTickType(QValueAxis::TicksDynamic);
 }
 
+void applyAxisRangeDynamic(QValueAxis *axis, double rawMin, double rawMax,
+                           int pixelHeight)
+{
+    // Compute target tick count from available pixel height.
+    // A minimum of ~50 px per tick keeps Y-labels readable.  Fall back to 5
+    // ticks when pixelHeight is 0 (before the chart is fully laid out).
+    const int kMinPixelsPerTick = 25;
+    int targetTicks = (pixelHeight > 0)
+        ? qBound(3, pixelHeight / kMinPixelsPerTick, 20)
+        : 7;
+    applyAxisRange(axis, roundAxisRange(rawMin, rawMax, targetTicks));
+}
+
 // ── Time-axis ticks ─────────────────────────────────────────────────────────
 
-qint64 niceTimeTickIntervalMs(qint64 windowMs)
+qint64 niceTimeTickIntervalMs(qint64 windowMs, int targetTicks)
 {
     static const qint64 kCandidates[] = {
         1  * 60 * 1000LL,   //  1 min
@@ -152,12 +165,7 @@ qint64 niceTimeTickIntervalMs(qint64 windowMs)
         24 * 3600 * 1000LL, // 24 h
     };
     const int n = static_cast<int>(sizeof(kCandidates) / sizeof(kCandidates[0]));
-    // Target a denser axis: ~10 labelled ticks across the visible window so
-    // the live power and temperature charts have time labels at finer
-    // granularity (Qt's QDateTimeAxis default of 5 leaves long unlabelled
-    // stretches).
-    const int targetTicks = 10;
-    qint64 rawStep = windowMs / targetTicks;
+    qint64 rawStep = windowMs / qMax(1, targetTicks);
     for (int i = 0; i < n; ++i) {
         if (kCandidates[i] >= rawStep)
             return kCandidates[i];
@@ -165,9 +173,16 @@ qint64 niceTimeTickIntervalMs(qint64 windowMs)
     return kCandidates[n - 1];
 }
 
-void applyTimeAxisTicks(QDateTimeAxis *axis, qint64 windowMs)
+void applyTimeAxisTicks(QDateTimeAxis *axis, qint64 windowMs, int pixelWidth)
 {
-    qint64 intervalMs = niceTimeTickIntervalMs(windowMs);
+    // Compute a target tick count from the available pixel width.
+    // A minimum of ~80 px per tick keeps labels readable.  Fall back to 10
+    // ticks when pixelWidth is 0 (e.g. before the chart has been laid out).
+    const int kMinPixelsPerTick = 45;
+    int targetTicks = (pixelWidth > 0)
+        ? qBound(2, pixelWidth / kMinPixelsPerTick, 20)
+        : 10;
+    qint64 intervalMs = niceTimeTickIntervalMs(windowMs, targetTicks);
     int tickCount = qMax(2, static_cast<int>(windowMs / intervalMs) + 1);
     axis->setTickCount(tickCount);
 }

@@ -201,6 +201,7 @@ void PowerChartBuilder::buildPowerChart(const FritzDevice &dev,
             currentText = QString::number(groupTotal, 'f', 1) + " W";
         }
 
+        m_powerChart = chart;
         m_powerAxisX = axisX;
         m_powerAxisY = axisY;
         // m_powerSeries / m_powerLowerSeries stay nullptr in stacked mode
@@ -268,7 +269,8 @@ void PowerChartBuilder::buildPowerChart(const FritzDevice &dev,
              applyAxisRange(axisY, roundAxisRange(minP, maxP));
          }
 
-        // Store axis/series pointers for in-place updates
+        // Store chart/axis/series pointers for in-place updates and dynamic tick computation
+        m_powerChart       = chart;
         m_powerAxisX       = axisX;
         m_powerAxisY       = axisY;
         m_powerSeries      = series;
@@ -549,7 +551,8 @@ void PowerChartBuilder::rescaleYPower(qint64 minMs, qint64 maxMs)
                 yMax = qMax(yMax, hi);
             }
         }
-        applyAxisRange(m_powerAxisY, roundAxisRange(yMin, yMax));
+        applyAxisRangeDynamic(m_powerAxisY, yMin, yMax,
+            m_powerChart ? static_cast<int>(m_powerChart->plotArea().height()) : 0);
         return;
     }
 
@@ -570,13 +573,15 @@ void PowerChartBuilder::rescaleYPower(qint64 minMs, qint64 maxMs)
         return;
     }
 
-    applyAxisRange(m_powerAxisY, roundAxisRange(minVal, maxVal));
+    applyAxisRangeDynamic(m_powerAxisY, minVal, maxVal,
+        m_powerChart ? static_cast<int>(m_powerChart->plotArea().height()) : 0);
 }
 
 // ── Reset / teardown ────────────────────────────────────────────────────────
 
 void PowerChartBuilder::reset()
 {
+    m_powerChart       = nullptr;
     m_powerAxisX       = nullptr;
     m_powerAxisY       = nullptr;
     m_powerSeries      = nullptr;

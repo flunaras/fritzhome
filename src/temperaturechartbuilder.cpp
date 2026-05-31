@@ -103,9 +103,10 @@ void TemperatureChartBuilder::buildTemperatureChart(const FritzDevice &dev)
         chart->legend()->show();
     }
 
-    // Store axis pointers for in-place updates
-    m_tempAxisX = axisX;
-    m_tempAxisY = axisY;
+    // Store chart/axis pointers for in-place updates and dynamic tick computation
+    m_tempChart  = chart;
+    m_tempAxisX  = axisX;
+    m_tempAxisY  = axisY;
     m_tempSeries = series;
 
     // Create the "Lock Y scale" checkbox overlaid inside the chart area (bottom-left).
@@ -201,6 +202,7 @@ void TemperatureChartBuilder::buildGroupTemperatureChart(const FritzDeviceList &
 
     chart->legend()->show();
 
+    m_groupTempChart = chart;
     m_groupTempAxisX = axisX;
     m_groupTempAxisY = axisY;
 
@@ -298,7 +300,8 @@ void TemperatureChartBuilder::rescaleYTemp(qint64 minMs, qint64 maxMs)
     }
 
     double margin = qMax(1.0, (maxVal - minVal) * 0.1);
-    applyAxisRange(m_tempAxisY, roundAxisRange(minVal - margin, maxVal + margin));
+    int ph = m_tempChart ? static_cast<int>(m_tempChart->plotArea().height()) : 0;
+    applyAxisRangeDynamic(m_tempAxisY, minVal - margin, maxVal + margin, ph);
 }
 
 void TemperatureChartBuilder::rescaleYGroupTemp(qint64 minMs, qint64 maxMs)
@@ -317,18 +320,21 @@ void TemperatureChartBuilder::rescaleYGroupTemp(qint64 minMs, qint64 maxMs)
         return;
     }
     double margin = qMax(1.0, (maxVal - minVal) * 0.1);
-    applyAxisRange(m_groupTempAxisY, roundAxisRange(minVal - margin, maxVal + margin));
+    int ph = m_groupTempChart ? static_cast<int>(m_groupTempChart->plotArea().height()) : 0;
+    applyAxisRangeDynamic(m_groupTempAxisY, minVal - margin, maxVal + margin, ph);
 }
 
 // ── Reset / teardown ────────────────────────────────────────────────────────
 
 void TemperatureChartBuilder::reset()
 {
+    m_tempChart  = nullptr;
     m_tempAxisX  = nullptr;
     m_tempAxisY  = nullptr;
     m_tempSeries = nullptr;
     m_tempValueLabel = nullptr;
 
+    m_groupTempChart = nullptr;
     m_groupTempAxisX = nullptr;
     m_groupTempAxisY = nullptr;
     m_groupTempSeries.clear();

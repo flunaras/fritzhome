@@ -58,6 +58,7 @@ private:
     ChartWidget &m_owner;
 
     // Power chart (single-device or stacked-group share the axes)
+    QChart        *m_powerChart       = nullptr;
     QDateTimeAxis *m_powerAxisX       = nullptr;
     QValueAxis    *m_powerAxisY       = nullptr;
     QXYSeries     *m_powerSeries      = nullptr;  ///< upper series (single-device mode)

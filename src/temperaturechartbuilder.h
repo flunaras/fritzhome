@@ -59,12 +59,14 @@ private:
     ChartWidget &m_owner;
 
     // Temperature chart (single device)
+    QChart        *m_tempChart  = nullptr;
     QDateTimeAxis *m_tempAxisX  = nullptr;
     QValueAxis    *m_tempAxisY  = nullptr;
     QXYSeries     *m_tempSeries = nullptr;
     QPointer<QLabel> m_tempValueLabel = nullptr;
 
     // Group temperature chart
+    QChart                 *m_groupTempChart  = nullptr;
     QDateTimeAxis          *m_groupTempAxisX = nullptr;
     QValueAxis             *m_groupTempAxisY = nullptr;
     QList<QXYSeries *>      m_groupTempSeries;

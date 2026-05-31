@@ -191,7 +191,20 @@ void EnergyHistoryBuilder::reset()
 {
     m_energyResCombo     = nullptr;
     m_energyChartView    = nullptr;
+    m_energyAxisY        = nullptr;
+    m_energyRawMin       = 0.0;
+    m_energyRawMax       = 1.0;
     m_energyBarTooltip.clear();
+}
+
+void EnergyHistoryBuilder::rescaleY()
+{
+    if (!m_energyAxisY || !m_energyChartView)
+        return;
+    int ph = static_cast<int>(m_energyChartView->chart()->plotArea().height());
+    if (ph <= 0)
+        return;
+    applyAxisRangeDynamic(m_energyAxisY, m_energyRawMin, m_energyRawMax, ph);
 }
 
 void EnergyHistoryBuilder::nullifyWidgetPointers(QWidget *w)
@@ -496,7 +509,11 @@ QValueAxis *EnergyHistoryBuilder::setupEnergyHistoryAxes(
     QValueAxis *axisY = new QValueAxis();
     axisY->setTitleText(useKwh ? i18n("kWh") : i18n("Wh"));
     axisY->setLabelFormat("%.1f");
-    applyAxisRange(axisY, roundAxisRange(minY, maxY));
+    // Store axis and raw range so rescaleY() can re-apply dynamic ticks on resize.
+    m_energyAxisY  = axisY;
+    m_energyRawMin = minY;
+    m_energyRawMax = maxY;
+    applyAxisRangeDynamic(axisY, minY, maxY);  // pixelHeight=0 → fallback 7 ticks
     chart->addAxis(axisY, Qt::AlignLeft);
     barSeries->attachAxis(axisY);
 

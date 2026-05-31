@@ -66,15 +66,23 @@ AxisRange roundAxisRange(double rawMin, double rawMax, int targetTicks = 5);
 /// the tick interval so that tick marks always land on round numbers.
 void applyAxisRange(QValueAxis *axis, const AxisRange &r);
 
+/// Like applyAxisRange but derives the target tick count from \a pixelHeight
+/// so that the Y-axis density scales with the chart area.  When \a pixelHeight
+/// is 0 (chart not yet laid out) it falls back to 5 ticks.
+void applyAxisRangeDynamic(QValueAxis *axis, double rawMin, double rawMax,
+                           int pixelHeight = 0);
+
 // ── Time-axis ticks ─────────────────────────────────────────────────────────
 
 /// Returns a "nice" tick interval in milliseconds for a time axis spanning
-/// windowMs milliseconds, targeting roughly 5-6 visible tick marks.
-qint64 niceTimeTickIntervalMs(qint64 windowMs);
+/// \a windowMs milliseconds targeting approximately \a targetTicks visible marks.
+qint64 niceTimeTickIntervalMs(qint64 windowMs, int targetTicks = 10);
 
 /// Applies dynamic ticks to a QDateTimeAxis so that tick marks land on
 /// absolute round-clock times and scroll smoothly as the visible window moves.
-void applyTimeAxisTicks(QDateTimeAxis *axis, qint64 windowMs);
+/// Pass \a pixelWidth > 0 (the chart plot area width in pixels) to scale the
+/// tick density to the available space; 0 falls back to ~10 ticks.
+void applyTimeAxisTicks(QDateTimeAxis *axis, qint64 windowMs, int pixelWidth = 0);
 
 // ── Chart factory helpers ───────────────────────────────────────────────────
 
