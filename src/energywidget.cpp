@@ -44,7 +44,10 @@ void EnergyWidget::updateDevice(const FritzDevice &device)
     const auto &em = device.energyStats;
 
     if (em.valid) {
-        m_powerLabel->setText(QString("%1 W").arg(em.power, 0, 'f', 1));
+        if (em.powerValid)
+            m_powerLabel->setText(QString("%1 W").arg(em.power, 0, 'f', 1));
+        else
+            m_powerLabel->setText(i18n("n/a"));
         m_energyLabel->setText(QString("%1 Wh  (%2 kWh)").arg(em.energy, 0, 'f', 0)
                                                           .arg(em.energy / 1000.0, 0, 'f', 3));
         m_voltageLabel->setText(QString("%1 V").arg(em.voltage, 0, 'f', 1));

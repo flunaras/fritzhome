@@ -276,10 +276,15 @@ void PowerChartBuilder::buildPowerChart(const FritzDevice &dev,
         m_powerSeries      = series;
         m_powerLowerSeries = lower;
 
-        // Format current power for the overlay label
+        // Format current power for the overlay label.
+        // When the Fritz!Box returned null for power this poll (powerValid=false),
+        // fall back to the last recorded history value to avoid showing 0 W.
         QString currentText;
         if (dev.energyStats.valid) {
-            double power = dev.isProducer ? -dev.energyStats.power : dev.energyStats.power;
+            double rawPower = dev.energyStats.powerValid
+                              ? dev.energyStats.power
+                              : (dev.powerHistory.isEmpty() ? 0.0 : dev.powerHistory.last().second);
+            double power = dev.isProducer ? -rawPower : rawPower;
             currentText = QString::number(power, 'f', 1) + " W";
         }
 
@@ -396,7 +401,11 @@ void PowerChartBuilder::updateRolling(const FritzDevice &device,
             m_powerLowerSeries->replace(lowerPts);
         }
         if (m_powerSeries && m_powerValueLabel && device.energyStats.valid) {
-            double power = device.isProducer ? -device.energyStats.power : device.energyStats.power;
+            // Fall back to last history value when Fritz!Box returned null for power.
+            double rawPower = device.energyStats.powerValid
+                              ? device.energyStats.power
+                              : (device.powerHistory.isEmpty() ? 0.0 : device.powerHistory.last().second);
+            double power = device.isProducer ? -rawPower : rawPower;
             m_powerValueLabel->setText(
                 QString::number(power, 'f', 1) + " W");
         }

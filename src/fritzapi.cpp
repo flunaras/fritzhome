@@ -476,8 +476,17 @@ void FritzApi::onAsyncReply(const QString &cacheKey, bool isDeviceStats, const Q
 
                 if (dev.hasTemperature() && dev.temperature > -273.0)
                     dev.temperatureHistory.append({now, dev.temperature});
-                if (dev.hasEnergyMeter() && dev.energyStats.valid)
-                    dev.powerHistory.append({now, dev.energyStats.power});
+                if (dev.hasEnergyMeter() && dev.energyStats.valid) {
+                    // If the Fritz!Box returned null for power this poll (transient
+                    // read error), repeat the last recorded value instead of
+                    // storing 0 W, which would produce dips in the chart.
+                    double histPower = dev.energyStats.powerValid
+                                      ? dev.energyStats.power
+                                      : (dev.powerHistory.isEmpty()
+                                         ? 0.0
+                                         : dev.powerHistory.last().second);
+                    dev.powerHistory.append({now, histPower});
+                }
                 if (dev.hasHumidity() && dev.humidityStats.valid)
                     dev.humidityHistory.append({now, static_cast<double>(dev.humidityStats.humidity)});
 
@@ -556,8 +565,19 @@ static void parseInterfaceState(const QJsonObject &ifaces, FritzDevice &dev)
 
     if (dev.hasEnergyMeter()) {
         QJsonObject mi = ifaces.value(QStringLiteral("multimeterInterface")).toObject();
-        // power in mW → divide by 1000 for W
-        dev.energyStats.power   = mi.value(QStringLiteral("power")).toDouble(0.0) / 1000.0;
+        // power in mW → divide by 1000 for W.
+        // The Fritz!Box occasionally returns null (or omits the field) for power
+        // during transient internal read errors while energy and voltage remain
+        // valid.  Distinguish that case via powerValid so callers can repeat the
+        // last known reading instead of recording a spurious 0 W.
+        const QJsonValue powerVal = mi.value(QStringLiteral("power"));
+        if (powerVal.isNull() || powerVal.isUndefined()) {
+            dev.energyStats.power      = 0.0;   // placeholder; callers must check powerValid
+            dev.energyStats.powerValid = false;
+        } else {
+            dev.energyStats.power      = powerVal.toDouble(0.0) / 1000.0;
+            dev.energyStats.powerValid = true;
+        }
         // energy in Wh — already correct
         dev.energyStats.energy  = mi.value(QStringLiteral("energy")).toDouble(0.0);
         // voltage in mV → divide by 1000 for V

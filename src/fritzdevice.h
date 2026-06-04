@@ -29,6 +29,11 @@ struct EnergyStats {
     double energy = 0.0;        // total energy in Wh
     double voltage = 0.0;       // voltage in V
     bool valid = false;
+    /// true when the Fritz!Box returned an actual power value this poll.
+    /// false when the field was absent or null in the JSON response (transient
+    /// Fritz!Box read error). Callers should substitute the previous known
+    /// value rather than treating 0 as the real reading.
+    bool powerValid = true;
 };
 
 /**
