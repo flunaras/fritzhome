@@ -25,6 +25,7 @@ class QStackedWidget;
 class QDockWidget;
 class QLabel;
 class QSpinBox;
+class QCheckBox;
 
 /**
  * MainWindow is the top-level application window for Fritz!Box Smart Home.
@@ -118,6 +119,9 @@ private:
     /// Load all native net power settings from QSettings into device model.
     void loadNativeNetPowerSettings();
 
+    /// Show a right-click context menu on the device tree for power-role toggles.
+    void onTreeContextMenu(const QPoint &pos);
+
     // ── Per-connection tree state persistence ───────────────────────────────
     /// Build the QSettings key prefix for the currently configured connection
     /// (host + username). Returns an empty string if either is empty.
@@ -166,6 +170,8 @@ private:
      QLabel         *m_deviceNameLabel = nullptr;
      QLabel         *m_chartIconLabel  = nullptr;  ///< icon shown left of the device name heading (chart dock)
      QLabel         *m_chartNameLabel  = nullptr;
+     QCheckBox      *m_chartProducerCheckBox  = nullptr;  ///< "Power producer" toggle in chart header row
+     QCheckBox      *m_chartNativeNetCheckBox = nullptr;  ///< "Native net power meter" toggle in chart header row
 
     // Track which device is selected (for refreshing the panel)
     QString         m_selectedAin;

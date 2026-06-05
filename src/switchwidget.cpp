@@ -88,18 +88,18 @@ SwitchWidget::SwitchWidget(FritzApi *api, QWidget *parent)
 
     layout->addWidget(grp);
 
-    // Power configuration group — only visible for energy-capable single devices.
-    // Contains both power-role checkboxes (mutually exclusive).
-    m_powerConfigGroup = new QGroupBox(i18n("Power configuration"), this);
-    m_powerConfigGroup->setVisible(false);
-    auto *powerConfigLayout = new QVBoxLayout(m_powerConfigGroup);
-    m_producerCheckBox = new QCheckBox(i18n("Power producer"), m_powerConfigGroup);
-    m_producerCheckBox->setToolTip(i18n("This device is a power producer (negates power/energy values in charts)"));
-    m_nativeNetCheckBox = new QCheckBox(i18n("Native net power meter"), m_powerConfigGroup);
-    m_nativeNetCheckBox->setToolTip(i18n("This device natively reports signed net power (positive=consuming, negative=producing)"));
-    powerConfigLayout->addWidget(m_producerCheckBox);
-    powerConfigLayout->addWidget(m_nativeNetCheckBox);
-    layout->addWidget(m_powerConfigGroup);
+    // Power-role checkboxes — flat/inline (no groupbox), hidden until an
+    // energy-capable non-group device is selected.  Mutually exclusive.
+    m_producerCheckBox = new QCheckBox(i18n("Power producer"), this);
+    m_producerCheckBox->setToolTip(
+        i18n("This device is a power producer (negates power/energy values in charts)"));
+    m_producerCheckBox->setVisible(false);
+    m_nativeNetCheckBox = new QCheckBox(i18n("Native net power meter"), this);
+    m_nativeNetCheckBox->setToolTip(
+        i18n("This device natively reports signed net power (positive=consuming, negative=producing)"));
+    m_nativeNetCheckBox->setVisible(false);
+    layout->addWidget(m_producerCheckBox);
+    layout->addWidget(m_nativeNetCheckBox);
 
     layout->addStretch();
 
@@ -263,18 +263,17 @@ void SwitchWidget::updateDevice(const FritzDevice &device)
          m_toggleBtn->setToolTip(QString());
      }
 
-     // Show the power configuration group only for energy-capable native devices.
+     // Show power-role checkboxes only for energy-capable native devices.
      // Groups do not expose per-group power-role flags — each member has its own.
-     // Block signals while updating checkbox states to avoid spurious emissions.
-     if (device.hasEnergyMeter() && !device.isGroup()) {
-         m_powerConfigGroup->setVisible(true);
+     const bool showPowerConfig = device.hasEnergyMeter() && !device.isGroup();
+     m_producerCheckBox->setVisible(showPowerConfig);
+     m_nativeNetCheckBox->setVisible(showPowerConfig);
+     if (showPowerConfig) {
          m_producerCheckBox->blockSignals(true);
          m_nativeNetCheckBox->blockSignals(true);
          m_producerCheckBox->setChecked(device.isProducer);
          m_nativeNetCheckBox->setChecked(device.nativeNetPower);
          m_producerCheckBox->blockSignals(false);
          m_nativeNetCheckBox->blockSignals(false);
-     } else {
-         m_powerConfigGroup->setVisible(false);
      }
 }

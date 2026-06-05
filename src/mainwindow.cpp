@@ -158,6 +158,11 @@ void MainWindow::setupDeviceTree()
      m_deviceTree->header()->setMinimumSectionSize(50);
      leftLayout->addWidget(m_deviceTree, 1);
 
+    // Right-click context menu for power-role toggles (producer / native net power).
+    m_deviceTree->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_deviceTree, &QTreeView::customContextMenuRequested,
+            this, &MainWindow::onTreeContextMenu);
+
     // Polling interval row below the tree
     QHBoxLayout *intervalRow = new QHBoxLayout();
     intervalRow->setContentsMargins(4, 2, 4, 2);
@@ -295,6 +300,42 @@ void MainWindow::setupControlPanel()
     chartNameRow->setSpacing(6);
     chartNameRow->addWidget(m_chartIconLabel);
     chartNameRow->addWidget(m_chartNameLabel, 1);
+
+    // Power-role checkboxes — right-aligned in the header row, hidden until an
+    // energy-capable single device is selected.
+    m_chartProducerCheckBox = new QCheckBox(i18n("Power producer"), chartContainer);
+    m_chartProducerCheckBox->setToolTip(
+        i18n("This device is a power producer (negates power/energy values in charts)"));
+    m_chartProducerCheckBox->hide();
+
+    m_chartNativeNetCheckBox = new QCheckBox(i18n("Native net power meter"), chartContainer);
+    m_chartNativeNetCheckBox->setToolTip(
+        i18n("This device natively reports signed net power (positive=consuming, negative=producing)"));
+    m_chartNativeNetCheckBox->hide();
+
+    chartNameRow->addWidget(m_chartProducerCheckBox);
+    chartNameRow->addWidget(m_chartNativeNetCheckBox);
+
+    // Mutual-exclusivity + persistence — same pattern as in SwitchWidget/EnergyWidget.
+    connect(m_chartProducerCheckBox, &QCheckBox::toggled, this, [this](bool checked) {
+        if (checked) {
+            m_chartNativeNetCheckBox->blockSignals(true);
+            m_chartNativeNetCheckBox->setChecked(false);
+            m_chartNativeNetCheckBox->blockSignals(false);
+            setDeviceNativeNetPowerStatus(m_selectedAin, false);
+        }
+        setDeviceProducerStatus(m_selectedAin, checked);
+    });
+    connect(m_chartNativeNetCheckBox, &QCheckBox::toggled, this, [this](bool checked) {
+        if (checked) {
+            m_chartProducerCheckBox->blockSignals(true);
+            m_chartProducerCheckBox->setChecked(false);
+            m_chartProducerCheckBox->blockSignals(false);
+            setDeviceProducerStatus(m_selectedAin, false);
+        }
+        setDeviceNativeNetPowerStatus(m_selectedAin, checked);
+    });
+
     chartLayout->addLayout(chartNameRow);
 
     m_chartWidget = new ChartWidget(chartContainer);
@@ -967,6 +1008,20 @@ void MainWindow::reselectDevice(const QString &ain)
             m_chartIconLabel->show();
             m_chartNameLabel->setText(dev.name);
             m_chartNameLabel->show();
+            // Show power-role checkboxes only for energy-capable single devices.
+            {
+                const bool showPower = dev.hasEnergyMeter() && !dev.isGroup();
+                m_chartProducerCheckBox->setVisible(showPower);
+                m_chartNativeNetCheckBox->setVisible(showPower);
+                if (showPower) {
+                    m_chartProducerCheckBox->blockSignals(true);
+                    m_chartNativeNetCheckBox->blockSignals(true);
+                    m_chartProducerCheckBox->setChecked(dev.isProducer);
+                    m_chartNativeNetCheckBox->setChecked(dev.nativeNetPower);
+                    m_chartProducerCheckBox->blockSignals(false);
+                    m_chartNativeNetCheckBox->blockSignals(false);
+                }
+            }
 
             // Suppress the panel update if a switch command was recently
             // issued for this device/group and the Fritz!Box may still be
@@ -1297,6 +1352,8 @@ void MainWindow::onDeviceSelected(const QModelIndex &current, const QModelIndex 
         m_deviceNameLabel->hide();
         m_chartIconLabel->hide();
         m_chartNameLabel->hide();
+        m_chartProducerCheckBox->hide();
+        m_chartNativeNetCheckBox->hide();
         return;
     }
 
@@ -1310,6 +1367,20 @@ void MainWindow::onDeviceSelected(const QModelIndex &current, const QModelIndex 
     m_chartIconLabel->show();
     m_chartNameLabel->setText(dev.name);
     m_chartNameLabel->show();
+    // Show power-role checkboxes only for energy-capable single devices.
+    {
+        const bool showPower = dev.hasEnergyMeter() && !dev.isGroup();
+        m_chartProducerCheckBox->setVisible(showPower);
+        m_chartNativeNetCheckBox->setVisible(showPower);
+        if (showPower) {
+            m_chartProducerCheckBox->blockSignals(true);
+            m_chartNativeNetCheckBox->blockSignals(true);
+            m_chartProducerCheckBox->setChecked(dev.isProducer);
+            m_chartNativeNetCheckBox->setChecked(dev.nativeNetPower);
+            m_chartProducerCheckBox->blockSignals(false);
+            m_chartNativeNetCheckBox->blockSignals(false);
+        }
+    }
     updateDevicePanel(dev);
     const FritzDeviceList memberDevs = dev.isGroup() ? collectMemberDevices(dev) : FritzDeviceList();
     m_chartWidget->updateDevice(dev, memberDevs);
@@ -1467,6 +1538,14 @@ void MainWindow::setDeviceProducerStatus(const QString &ain, bool isProducer)
     // Rebuild power charts immediately if the affected device is currently selected
     if (ain == m_selectedAin) {
         m_chartWidget->updateForDeviceProducerStatusChange(isProducer);
+        // Keep chart header checkboxes in sync (block to avoid re-entry).
+        m_chartProducerCheckBox->blockSignals(true);
+        m_chartNativeNetCheckBox->blockSignals(true);
+        m_chartProducerCheckBox->setChecked(isProducer);
+        if (isProducer)
+            m_chartNativeNetCheckBox->setChecked(false);
+        m_chartProducerCheckBox->blockSignals(false);
+        m_chartNativeNetCheckBox->blockSignals(false);
     }
 }
 
@@ -1503,6 +1582,14 @@ void MainWindow::setDeviceNativeNetPowerStatus(const QString &ain, bool nativeNe
     // Rebuild power charts immediately if the affected device is currently selected
     if (ain == m_selectedAin) {
         m_chartWidget->updateForDeviceNativeNetPowerChange(nativeNetPower);
+        // Keep chart header checkboxes in sync (block to avoid re-entry).
+        m_chartProducerCheckBox->blockSignals(true);
+        m_chartNativeNetCheckBox->blockSignals(true);
+        m_chartNativeNetCheckBox->setChecked(nativeNetPower);
+        if (nativeNetPower)
+            m_chartProducerCheckBox->setChecked(false);
+        m_chartProducerCheckBox->blockSignals(false);
+        m_chartNativeNetCheckBox->blockSignals(false);
     }
 }
 
@@ -1522,4 +1609,47 @@ void MainWindow::loadNativeNetPowerSettings()
             m_model->updateDeviceNativeNetPowerStatus(ain, true);
     }
     s.endGroup();
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Right-click context menu on the device tree — power-role toggles.
+// Only shown for energy-capable leaf devices (not groups, not non-energy devices).
+void MainWindow::onTreeContextMenu(const QPoint &pos)
+{
+    const QModelIndex idx = m_deviceTree->indexAt(pos);
+    if (!idx.isValid() || m_model->isGroupHeader(idx))
+        return;
+
+    const FritzDevice dev = m_model->deviceAt(idx);
+    if (!dev.hasEnergyMeter() || dev.isGroup())
+        return;
+
+    QMenu menu(this);
+
+    QAction *producerAct = menu.addAction(i18n("Power producer"));
+    producerAct->setCheckable(true);
+    producerAct->setChecked(dev.isProducer);
+    producerAct->setToolTip(
+        i18n("This device is a power producer (negates power/energy values in charts)"));
+
+    QAction *nativeNetAct = menu.addAction(i18n("Native net power meter"));
+    nativeNetAct->setCheckable(true);
+    nativeNetAct->setChecked(dev.nativeNetPower);
+    nativeNetAct->setToolTip(
+        i18n("This device natively reports signed net power (positive=consuming, negative=producing)"));
+
+    QAction *chosen = menu.exec(m_deviceTree->viewport()->mapToGlobal(pos));
+    if (chosen == producerAct) {
+        const bool newVal = !dev.isProducer;
+        // Mutual exclusivity: turning producer ON clears nativeNetPower first.
+        if (newVal)
+            setDeviceNativeNetPowerStatus(dev.ain, false);
+        setDeviceProducerStatus(dev.ain, newVal);
+    } else if (chosen == nativeNetAct) {
+        const bool newVal = !dev.nativeNetPower;
+        // Mutual exclusivity: turning nativeNetPower ON clears producer first.
+        if (newVal)
+            setDeviceProducerStatus(dev.ain, false);
+        setDeviceNativeNetPowerStatus(dev.ain, newVal);
+    }
 }
