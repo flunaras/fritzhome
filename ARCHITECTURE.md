@@ -178,21 +178,27 @@ MainWindow  (QMainWindow / KXmlGuiWindow)
 │           ├── [7] QScrollArea → HumiditySensorWidget
 │           └── [8] QScrollArea → AlarmWidget
 ├── QDockWidget  (m_chartDock, "Charts")
-│   └── ChartWidget  (m_chartWidget)
-│       ├── QTabWidget  (m_tabs)
-│       │   ├── Tab "Temperature"  → QChartView
-│       │   ├── Tab "Power"        → QChartView
-│       │   ├── Tab "Humidity"     → QChartView
-│       │   ├── Tab "Energy"       → QWidget (outer panel, grey background)
-│       │   │                         └── QWidget (inner, white background)
-│       │   │                              ├── QLabel (gauge labels: kWh, W, V)
-│       │   │                              └── QChartView (m_groupEnergyPieView, optional pie chart)
-│       │   └── Tab "Energy History" (index m_energyHistoryTabIndex)
-│       │       ├── QComboBox  (m_energyResCombo)
-│       │       └── QChartView
-│       └── QComboBox / QLabel  (m_windowCombo / m_windowComboTemp + caption)
-│           — direct children of the chartStack widget inside each Temperature/Power
-│           chart tab, positioned absolutely via a ResizeFilter event filter
+│   └── QWidget  (chartContainer)
+│       ├── QHBoxLayout (chartNameRow)
+│       │   ├── QLabel        (m_chartIconLabel, 32×32 device icon; hidden when no device selected)
+│       │   ├── QLabel        (m_chartNameLabel, bold +3pt device name; hidden when no device selected)
+│       │   ├── QCheckBox     (m_chartProducerCheckBox, "Power producer"; hidden for groups / non-energy devices)
+│       │   └── QCheckBox     (m_chartNativeNetCheckBox, "Native net power meter"; same visibility rules)
+│       └── ChartWidget  (m_chartWidget)
+│           ├── QTabWidget  (m_tabs)
+│           │   ├── Tab "Temperature"  → QChartView
+│           │   ├── Tab "Power"        → QChartView
+│           │   ├── Tab "Humidity"     → QChartView
+│           │   ├── Tab "Energy"       → QWidget (outer panel, grey background)
+│           │   │                         └── QWidget (inner, white background)
+│           │   │                              ├── QLabel (gauge labels: kWh, W, V)
+│           │   │                              └── QChartView (m_groupEnergyPieView, optional pie chart)
+│           │   └── Tab "Energy History" (index m_energyHistoryTabIndex)
+│           │       ├── QComboBox  (m_energyResCombo)
+│           │       └── QChartView
+│           └── QComboBox / QLabel  (m_windowCombo / m_windowComboTemp + caption)
+│               — direct children of the chartStack widget inside each Temperature/Power
+│               chart tab, positioned absolutely via a ResizeFilter event filter
 ├── QWidget  (central widget placeholder, zero size)
 ├── QMenuBar
 │   ├── QMenu  "&File"
@@ -546,30 +552,48 @@ recreates the combo with items and signal wiring from scratch.
 - **Animations:** disabled for all energy history views (`QChart::NoAnimation`, the default
   from `makeBaseChart`). The "grow from zero" effect on bar rebuilds is distracting.
 
-### Producer / consumer device classification
+ ### Producer / consumer device classification
 
-Individual energy-capable devices can be marked as **power producers** (e.g. solar panels)
-via the "Power producer" checkbox in `SwitchWidget` (top-right of the control panel) or
-`EnergyWidget`. The flag is stored as `FritzDevice::isProducer` and persisted to `QSettings`
-under `devices/<ain>/isProducer`. Groups never have a producer flag — each member carries its own.
+Individual energy-capable devices can be assigned one of two **mutually exclusive** power-role flags. Both flags appear as flat inline checkboxes in three UI locations:
+- **SwitchWidget / EnergyWidget** control panel (below the device controls)
+- **Chart dock header row** — right-aligned next to the device name (`m_chartProducerCheckBox`, `m_chartNativeNetCheckBox`); visible only for energy-capable non-group devices
+- **Tree view right-click context menu** (`onTreeContextMenu`) — two checkable actions; only shown for energy-capable leaf devices
+
+Toggling either checkbox enforces mutual exclusivity (setting one clears the other) and immediately calls `MainWindow::setDeviceProducerStatus` or `MainWindow::setDeviceNativeNetPowerStatus`, which persists the flag to QSettings, updates the model, and triggers an in-place chart rebuild.
+
+#### `isProducer` — power producer (values negated)
+
+Stored as `FritzDevice::isProducer`, persisted under `devices/<ain>/isProducer`. Groups never have a producer flag — each member carries its own.
 
 **Effect on charts and views:**
 
 - **Tree view** (`DeviceModel::ColPower`): power value is negated for producer devices; tooltip reflects the negated sign.
 - **Rolling power chart** (single device): values negated; area extends below zero.
-- **Rolling power chart** (group, stacked): consumer bands stack upward from zero; producer bands stack downward from zero independently, so they never cross. A black `QLineSeries` ("Net") is drawn on top of all bands **only when members have mixed producer/consumer roles** — showing the signed sum per timestamp (consumers positive, producers negative), updated on every rolling poll.
-- **Energy history chart** (single device): bar values negated; Y-axis range flipped to `[−maxVal, 0]`; total label shows the absolute value prefixed with "−" (e.g. `−1166.0 Wh`) — `qAbs(rawTotal)` is formatted first so the sign is never doubled.
-- **Energy history chart** (group, stacked): per-member values negated for producers; `minStack`/`maxStack` track the negative/positive extremes for the Y-axis range. A **net overlay** and legend entry are shown **only when members have mixed producer/consumer roles** (`hasMixedProducers = hasProducer && hasConsumer`):
+- **Rolling power chart** (group, stacked): consumer bands stack upward from zero; producer bands stack downward from zero independently, so they never cross. A black `QLineSeries` ("Net") is drawn on top of all bands **only when members have mixed producer/consumer roles or any member has `nativeNetPower` set** (`hasNonUniform`) — showing the signed sum per timestamp, updated on every rolling poll.
+- **Energy history chart** (single device): bar values negated; Y-axis range flipped to `[−maxVal, 0]`; total label shows the absolute value prefixed with "−".
+- **Energy history chart** (group, stacked): per-member values negated for producers; `minStack`/`maxStack` track the negative/positive extremes for the Y-axis range. A **net overlay** and legend entry are shown when `hasNonUniform` (mixed producer/consumer roles **or** any member has `nativeNetPower`):
   - `QGraphicsRectItem` (zValue 9, behind stacked bars at ~10): semi-transparent black fill from zero to the net value, matching bar width exactly (`halfBar = slotWidth × 0.4`).
-  - `QGraphicsLineItem` (zValue 12, above everything): 2 px black cap line at the net value, width `halfBar − 1 px` to stay strictly inside the bar edges at any zoom level.
-  - An empty `QLineSeries` named "Net" (black 2 px pen, no data points) is added to the chart and attached to its axes solely to register a **legend marker** in the Qt Charts built-in legend. The ghost-bar overlay provides the actual visual; the series renders nothing.
-- **Energy gauge** (single device): power label is negated (negative = produced); kWh label shows the **absolute** value (positive number) under the heading "Total Energy Produced" / "Total Energy Consumed" — the heading already communicates direction. For groups: net signed energy/power computed from members.
-- **Pie chart** (group energy tab): `QPieSeries` requires positive values — absolute magnitude is used for slice sizing; the signed value is stored as a `QVariant` property `"signedEnergy"` on each slice and used for label rendering so negative (producer) shares display correctly.
+  - `QGraphicsLineItem` (zValue 12, above everything): 2 px black cap line at the net value, width `halfBar − 1 px`.
+  - An empty `QLineSeries` named "Net" (black 2 px pen, no data points) is added solely to register a **legend marker** in the Qt Charts built-in legend.
+- **Energy gauge** (single device): power label is negated; kWh label shows the absolute value under the heading "Total Energy Produced" / "Total Energy Consumed". For groups: net signed energy/power computed from members.
+- **Pie chart** (group energy tab): absolute magnitude used for slice sizing; signed value stored as `QVariant` property `"signedEnergy"` on each slice for label rendering.
 
-**Immediate chart refresh on toggle:** `MainWindow::setDeviceProducerStatus` calls
-`ChartWidget::updateForDeviceProducerStatusChange` which rebuilds the Energy gauge tab
-and Energy History tab in-place (without a full device switch) so the user sees the
-effect immediately without waiting for the next poll.
+#### `nativeNetPower` — native net power meter (values used as-is)
+
+Stored as `FritzDevice::nativeNetPower`, persisted under `devices/<ain>/nativeNetPower`. The device already reports a signed net power value (positive = consuming, negative = producing); **no sign inversion is applied anywhere**. Mutually exclusive with `isProducer`.
+
+**Effect on charts and views:**
+
+- **Tree view**: power value used as-is (no negation); can be negative when device is exporting.
+- **Rolling / stacked power chart**: value added as-is to the group sum; contributes to `hasNonUniform`, triggering the net overlay whenever any group member has this flag.
+- **Energy history chart**: value used as-is for bar height and stacking.
+- **Energy gauge** (single device): heading shows **"Net Energy"** instead of the directional "Total Energy Produced"/"Total Energy Consumed". Power and kWh values are used as-is.
+- `EnergyHistoryBuilder::MemberHistoryEntry` carries a `nativeNetPower` field alongside `isProducer` so each member's sign convention is applied correctly during stacked chart construction.
+
+**Immediate chart refresh on toggle:** `MainWindow::setDeviceNativeNetPowerStatus` calls
+`ChartWidget::updateForDeviceNativeNetPowerChange` which rebuilds the Power, Energy gauge, and
+Energy History tabs in-place. Parallel to `setDeviceProducerStatus` / `updateForDeviceProducerStatusChange`.
+
 - **No-op refresh guard:** `updateEnergyStats` and `updateGroupEnergyStats` compare the
   incoming `StatSeries::values` list for the currently displayed grid against the cached
   copy. If the values are identical the expensive remove-rebuild cycle is skipped; only
@@ -732,7 +756,8 @@ vertically so the total bar height equals the sum of all member contributions.
    - `m_groupStatsPending` counts outstanding member requests; when it reaches 0 (all
      members replied), the `memberStats` list is constructed with **human-readable device
      names** (resolved via `m_model->deviceByAin(memberAin).name`, falling back to the
-     raw AIN if the name is empty) and passed to
+     raw AIN if the name is empty) and the member's `isProducer` and `nativeNetPower` flags
+     (read from the model at assembly time), then passed to
      `ChartWidget::updateGroupEnergyStats(memberStats)`.
 
 3. **Rendering** (`ChartWidget::updateGroupEnergyStats`):
@@ -753,7 +778,7 @@ vertically so the total bar height equals the sum of all member contributions.
 | Member | Type | Purpose |
 |---|---|---|
 | `m_groupHistoryMode` | `bool` | True when the last-shown energy history was a group chart |
-| `m_lastGroupMemberStats` | `QList<QPair<QString,DeviceBasicStats>>` | Cached per-member stats, used for resolution changes |
+| `m_lastGroupMemberStats` | `QList<MemberHistoryEntry>` | Cached per-member stats (`name`, `stats`, `isProducer`, `nativeNetPower`); used for resolution changes and stacked chart rebuilds |
 | `m_memberDevices` | `FritzDeviceList` | Member device objects (name lookup for bar labels) |
 
 ### ChartWidget state for energy history error display
@@ -873,6 +898,8 @@ so it does not affect Clang builds).
 | `ui/energyResIdx`          | Energy History resolution combo index (0 = Last 24 h, 1 = Rolling month, 2 = Last 2 years) |
 | `connections/<user>@<host>/expandedGroups` | List of group labels expanded in the device tree for this Fritz!Box (persisted only after successful login; restored on next login to the same `(username, host)` pair) |
 | `connections/<user>@<host>/selectedAin`    | AIN of the device selected in the tree for this Fritz!Box (persisted only after successful login; restored on next login) |
+| `devices/<ain>/isProducer`      | `true` → device is a power producer; values negated throughout (charts, tree view wattage, gauge heading) |
+| `devices/<ain>/nativeNetPower`  | `true` → device natively reports signed net power (positive = consuming, negative = producing); values used as-is, no negation; gauge shows "Net Energy" |
 
 Password is never persisted.
 

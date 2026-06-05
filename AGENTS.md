@@ -87,10 +87,17 @@ UI layer:
 - `src/mainwindow.h / .cpp` — top-level window; device tree, panel switching, signal routing
 - `src/loginwindow.h / .cpp` — connection dialog (host, username, password, TLS cert warning checkbox)
 - `src/devicemodel.h / .cpp` — QAbstractItemModel (2-level tree: groups + devices)
-- `src/chartwidget.h / .cpp` — **Qt Charts time-series + energy history** (complex state management)
+- `src/chartwidget.h / .cpp` — **orchestrator for all chart tabs**: delegates to four dedicated builder classes (`TemperatureChartBuilder`, `PowerChartBuilder`, `EnergyGaugeBuilder`, `EnergyHistoryBuilder`); manages tab lifecycle, scroll bars, skip-rebuild guards, and chart state persistence
+
+Chart builder classes (each handles one tab family):
+- `src/powerchartbuilder.h / .cpp` — rolling power chart (single + stacked group); `hasNonUniform` condition triggers net overlay for mixed producer/consumer/nativeNetPower groups
+- `src/energygaugebuilder.h / .cpp` — energy gauge tab; heading adapts to `isProducer` ("Total Energy Produced"), `nativeNetPower` ("Net Energy"), or default ("Total Energy Consumed")
+- `src/energyhistorybuilder.h / .cpp` — energy history bar chart (3 resolutions, single + stacked group); `MemberHistoryEntry` carries `isProducer` and `nativeNetPower` per member
+- `src/temperaturechartbuilder.h / .cpp` — temperature/humidity time-series chart
+- `src/chartutils.h` — shared chart utility helpers
 
 Device control panels (one per device type, all inherit DeviceWidget):
-- `src/devicewidget.h / .cpp` — **abstract base class** for all device control panels (defines `updateDevice()` virtual interface)
+- `src/devicewidget.h / .cpp` — **abstract base class** for all device control panels (defines `updateDevice()` virtual interface; declares `producerStatusChanged` and `nativeNetPowerChanged` signals used for power-role persistence)
 - `src/switchwidget.h / .cpp` — smart plug control
 - `src/thermostatwidget.h / .cpp` — radiator controller (HKR)
 - `src/energywidget.h / .cpp` — energy meter (read-only)
@@ -134,6 +141,7 @@ Translations:
 - Pie chart for group member energy distribution (only groups)
 - Skip-rebuild guard: caches `m_activeEnergyGrid` + `m_lastEnergyStats` to skip expensive teardown if new data matches last build
 - All-zero/all-NaN fallback to "No energy data available" placeholder
+- Net overlay (rolling power chart black line; energy history semi-transparent bar + cap line) triggered by `hasNonUniform`: any group has mixed producer/consumer members **or** any member has `nativeNetPower = true`
 
 **UI state persistence:**
 - All window geometry, splitter positions, column widths, chart resolution, time-window combo index stored in QSettings
@@ -490,6 +498,8 @@ Then run tests inside Docker:
 9. **GCC 15 compiler warning** — `-Wstringop-overflow` false positive in chartwidget.cpp, suppressed via per-file `COMPILE_OPTIONS` in CMakeLists.txt (GCC-only guard).
 
 10. **Cross-compilation aarch64** — build system has special handling for `tumbleweed-aarch64` via `cmake/toolchain-aarch64.cmake`. If modifying CMake config, test both x86_64 and aarch64 Docker builds to avoid linker/sysroot surprises.
+
+11. **`isProducer` / `nativeNetPower` mutual exclusivity** — these two power-role flags are mutually exclusive. The chart header checkboxes (`m_chartProducerCheckBox`, `m_chartNativeNetCheckBox` in `MainWindow`), tree context menu actions, and device panel checkboxes (SwitchWidget / EnergyWidget) must all enforce this: toggling one ON must clear the other before calling the persist slot. Use `blockSignals(true)` on the counterpart checkbox before calling `setChecked(false)` to avoid recursive signal loops. `kSettingsKeyNativeNetPower` is defined only in `mainwindow.cpp`; there is no corresponding constant in `devicemodel.cpp` — do not add arithmetic sign-flip logic there for nativeNetPower (values are always used as-is).
 
 ## Useful Commands
 
