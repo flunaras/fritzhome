@@ -547,6 +547,20 @@ void DeviceModel::updateDeviceProducerStatus(const QString &ain, bool isProducer
     }
 }
 
+void DeviceModel::updateDeviceNativeNetPowerStatus(const QString &ain, bool nativeNetPower)
+{
+    for (int gi = 0; gi < m_groups.size(); ++gi) {
+        for (int di = 0; di < m_groups[gi].devices.size(); ++di) {
+            if (m_groups[gi].devices[di].ain == ain) {
+                m_groups[gi].devices[di].nativeNetPower = nativeNetPower;
+                QModelIndex idx = index(di, 0, index(gi, 0));
+                emit dataChanged(idx, idx);
+                return;
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Status helper
 // ---------------------------------------------------------------------------

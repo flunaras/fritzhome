@@ -23,18 +23,38 @@ EnergyWidget::EnergyWidget(FritzApi *api, QWidget *parent)
     form->addRow(i18n("Total Energy:"),  m_energyLabel);
     form->addRow(i18n("Voltage:"),       m_voltageLabel);
 
-    // Producer checkbox — always shown for EnergyWidget (energy-only devices always have a meter)
-    m_producerCheckBox = new QCheckBox(i18n("This device is a power producer (negate power chart)"), grp);
+    // Power-role checkboxes — mutually exclusive (producer vs. native net power meter).
+    m_producerCheckBox = new QCheckBox(i18n("Power producer"), grp);
+    m_producerCheckBox->setToolTip(i18n("This device is a power producer (negates power/energy values in charts)"));
+    m_nativeNetCheckBox = new QCheckBox(i18n("Native net power meter"), grp);
+    m_nativeNetCheckBox->setToolTip(i18n("This device natively reports signed net power (positive=consuming, negative=producing)"));
 
     grpLayout->addLayout(form);
     grpLayout->addWidget(m_producerCheckBox);
+    grpLayout->addWidget(m_nativeNetCheckBox);
 
     layout->addWidget(grp);
     layout->addStretch();
 
-    // Producer checkbox: emit signal so MainWindow can persist and rebuild charts
+    // Power-role checkboxes are mutually exclusive.
+    // When one is turned ON the other is unchecked and its *Changed signal is emitted.
     connect(m_producerCheckBox, &QCheckBox::toggled, this, [this](bool checked) {
+        if (checked) {
+            m_nativeNetCheckBox->blockSignals(true);
+            m_nativeNetCheckBox->setChecked(false);
+            m_nativeNetCheckBox->blockSignals(false);
+            emit nativeNetPowerChanged(m_device.ain, false);
+        }
         emit producerStatusChanged(m_device.ain, checked);
+    });
+    connect(m_nativeNetCheckBox, &QCheckBox::toggled, this, [this](bool checked) {
+        if (checked) {
+            m_producerCheckBox->blockSignals(true);
+            m_producerCheckBox->setChecked(false);
+            m_producerCheckBox->blockSignals(false);
+            emit producerStatusChanged(m_device.ain, false);
+        }
+        emit nativeNetPowerChanged(m_device.ain, checked);
     });
 }
 
@@ -57,11 +77,17 @@ void EnergyWidget::updateDevice(const FritzDevice &device)
         m_voltageLabel->setText(i18n("n/a"));
     }
 
-    // Update checkbox state without triggering producerStatusChanged signal.
-    // Hide the checkbox for group devices — groups have no single producer flag;
-    // the per-member flag on each native device controls chart sign instead.
-    m_producerCheckBox->setVisible(!device.isGroup());
-    m_producerCheckBox->blockSignals(true);
-    m_producerCheckBox->setChecked(device.isProducer);
-    m_producerCheckBox->blockSignals(false);
+    // Update checkbox states without triggering signals.
+    // Hide both for group devices — each member has its own per-device flags.
+    const bool showPowerConfig = !device.isGroup();
+    m_producerCheckBox->setVisible(showPowerConfig);
+    m_nativeNetCheckBox->setVisible(showPowerConfig);
+    if (showPowerConfig) {
+        m_producerCheckBox->blockSignals(true);
+        m_nativeNetCheckBox->blockSignals(true);
+        m_producerCheckBox->setChecked(device.isProducer);
+        m_nativeNetCheckBox->setChecked(device.nativeNetPower);
+        m_producerCheckBox->blockSignals(false);
+        m_nativeNetCheckBox->blockSignals(false);
+    }
 }

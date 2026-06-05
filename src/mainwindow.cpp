@@ -57,6 +57,10 @@
 // Full path written: "devices/<ain>/isProducer"
 static const char *kSettingsKeyIsProducer = "isProducer";
 
+// QSettings key for the per-device native net power flag (must match devicemodel.cpp).
+// Full path written: "devices/<ain>/nativeNetPower"
+static const char *kSettingsKeyNativeNetPower = "nativeNetPower";
+
 // Indices into m_controlStack
 enum PanelIndex {
     PanelEmpty       = 0,
@@ -352,10 +356,11 @@ void MainWindow::wireSignals()
                              if (it != m_groupMemberStats.constEnd()) {
                                  FritzDevice memberDev = m_model->deviceByAin(memberAin);
                                  MemberHistoryEntry entry;
-                                 entry.name       = memberDev.name.isEmpty() ? memberAin : memberDev.name;
-                                 entry.stats      = it.value();
-                                 entry.isProducer = memberDev.isProducer;
-                                 memberStats.append(entry);
+                                  entry.name       = memberDev.name.isEmpty() ? memberAin : memberDev.name;
+                                  entry.stats      = it.value();
+                                  entry.isProducer    = memberDev.isProducer;
+                                  entry.nativeNetPower = memberDev.nativeNetPower;
+                                  memberStats.append(entry);
                              }
                          }
                          m_chartWidget->updateGroupEnergyStats(memberStats);
@@ -392,10 +397,11 @@ void MainWindow::wireSignals()
                              if (it != m_groupMemberStats.constEnd()) {
                                  FritzDevice memberDev2 = m_model->deviceByAin(memberAin);
                                  MemberHistoryEntry entry;
-                                 entry.name       = memberDev2.name.isEmpty() ? memberAin : memberDev2.name;
-                                 entry.stats      = it.value();
-                                 entry.isProducer = memberDev2.isProducer;
-                                 memberStats.append(entry);
+                                  entry.name       = memberDev2.name.isEmpty() ? memberAin : memberDev2.name;
+                                  entry.stats      = it.value();
+                                  entry.isProducer    = memberDev2.isProducer;
+                                  entry.nativeNetPower = memberDev2.nativeNetPower;
+                                  memberStats.append(entry);
                              }
                          }
                          m_chartWidget->updateGroupEnergyStats(memberStats);
@@ -422,6 +428,16 @@ void MainWindow::wireSignals()
         if (!dw) continue;
         connect(dw, &DeviceWidget::producerStatusChanged,
                 this, &MainWindow::setDeviceProducerStatus);
+    }
+
+    // Native-net-power checkbox signal from device panels — persist setting and rebuild charts
+    for (int i = 1; i < m_controlStack->count(); ++i) {
+        QScrollArea *sa = qobject_cast<QScrollArea *>(m_controlStack->widget(i));
+        if (!sa) continue;
+        DeviceWidget *dw = qobject_cast<DeviceWidget *>(sa->widget());
+        if (!dw) continue;
+        connect(dw, &DeviceWidget::nativeNetPowerChanged,
+                this, &MainWindow::setDeviceNativeNetPowerStatus);
     }
 
      // Polling interval spinbox
@@ -1060,10 +1076,12 @@ void MainWindow::onDeviceListUpdated(const FritzDeviceList &devices)
     m_model->updateDevices(devices);
     // Apply local groups after Fritz!Box devices so synthesized entries have
     // access to the full device list for capability/state computation.
-    m_model->setLocalGroups(m_localGroupManager->groups(), devices);
-    // Re-apply saved producer flags after every model reset (updateDevices
-    // and setLocalGroups rebuild from scratch, losing any runtime-only isProducer state).
-    loadProducerSettings();
+     m_model->setLocalGroups(m_localGroupManager->groups(), devices);
+     // Re-apply saved producer and native-net-power flags after every model reset
+     // (updateDevices and setLocalGroups rebuild from scratch, losing any
+     // runtime-only isProducer / nativeNetPower state).
+     loadProducerSettings();
+     loadNativeNetPowerSettings();
 
     initColumnSizes(devices);
     // When restoring saved state, never fall back to expand-all even on first
@@ -1169,10 +1187,11 @@ void MainWindow::onLocalGroupsChanged()
     const QString previousAin     = m_selectedAin;
     const QSet<QString> expanded  = saveTreeState();
     m_model->setLocalGroups(m_localGroupManager->groups(), m_lastFritzDevices);
-    // Re-apply producer flags: setLocalGroups() rebuilds from scratch so all
-    // isProducer fields are reset to false.  collectMemberDevices() reads from
-    // the model, so flags must be restored before we rebuild the chart.
+    // Re-apply producer and native-net-power flags: setLocalGroups() rebuilds
+    // from scratch so all flags are reset to false.  collectMemberDevices()
+    // reads from the model, so flags must be restored before we rebuild the chart.
     loadProducerSettings();
+    loadNativeNetPowerSettings();
     restoreTreeState(expanded, false);
     if (previousAin.isEmpty())
         return;
@@ -1465,6 +1484,42 @@ void MainWindow::loadProducerSettings()
             false).toBool();
         if (isProducer)
             m_model->updateDeviceProducerStatus(ain, true);
+    }
+    s.endGroup();
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Persist native net power status for a device and rebuild charts.
+void MainWindow::setDeviceNativeNetPowerStatus(const QString &ain, bool nativeNetPower)
+{
+    // Persist to QSettings
+    QSettings s;
+    s.setValue(QStringLiteral("devices/") + ain + QLatin1Char('/') +
+               QString::fromLatin1(kSettingsKeyNativeNetPower), nativeNetPower);
+
+    // Update model so future device list updates and chart rebuilds see the correct flag
+    m_model->updateDeviceNativeNetPowerStatus(ain, nativeNetPower);
+
+    // Rebuild power charts immediately if the affected device is currently selected
+    if (ain == m_selectedAin) {
+        m_chartWidget->updateForDeviceNativeNetPowerChange(nativeNetPower);
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Load all native net power settings from QSettings and apply to the device model.
+// Must be called after updateDevices() so the model is populated.
+void MainWindow::loadNativeNetPowerSettings()
+{
+    QSettings s;
+    s.beginGroup(QStringLiteral("devices"));
+    const QStringList ains = s.childGroups();
+    for (const QString &ain : ains) {
+        const bool nativeNetPower = s.value(
+            ain + QLatin1Char('/') + QString::fromLatin1(kSettingsKeyNativeNetPower),
+            false).toBool();
+        if (nativeNetPower)
+            m_model->updateDeviceNativeNetPowerStatus(ain, true);
     }
     s.endGroup();
 }

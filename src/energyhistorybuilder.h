@@ -52,11 +52,13 @@ struct EnergyCategories {
 };
 
 /// Per-member entry for the stacked energy history chart.
-/// Carries the display name, statistics, and producer flag for each group member.
+/// Carries the display name, statistics, producer flag, and native-net-power
+/// flag for each group member.
 struct MemberHistoryEntry {
     QString          name;
     DeviceBasicStats stats;
-    bool             isProducer = false;
+    bool             isProducer   = false;
+    bool             nativeNetPower = false;
 };
 
 /// Builds and manages the Energy History chart tab (single-device and group).

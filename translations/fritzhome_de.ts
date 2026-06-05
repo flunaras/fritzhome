@@ -1045,8 +1045,24 @@ oder klicken Sie auf +, um eine neue zu erstellen.</translation>
          <translation>Nettenergie (Gruppe)</translation>
      </message>
      <message>
+         <source>Net Energy</source>
+         <translation>Netto-Energie</translation>
+     </message>
+     <message>
          <source>Net</source>
          <translation>Netto</translation>
+     </message>
+     <message>
+         <source>Power configuration</source>
+         <translation>Stromkonfiguration</translation>
+     </message>
+     <message>
+         <source>Native net power meter</source>
+         <translation>Nativer Netto-Leistungszähler</translation>
+     </message>
+     <message>
+         <source>This device natively reports signed net power (positive=consuming, negative=producing)</source>
+         <translation>Dieses Gerät meldet von sich aus vorzeichenbehaftete Nettoleistung (positiv=Verbrauch, negativ=Erzeugung)</translation>
      </message>
      <message>
          <source>Incomplete data — no history for: %1</source>

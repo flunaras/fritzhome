@@ -25,6 +25,10 @@ signals:
     /// Connected by MainWindow to persist the setting and rebuild power charts.
     void producerStatusChanged(const QString &ain, bool isProducer);
 
+    /// Emitted when the user toggles the "Native net power meter" checkbox.
+    /// Connected by MainWindow to persist the setting and rebuild power charts.
+    void nativeNetPowerChanged(const QString &ain, bool nativeNetPower);
+
 protected:
     FritzApi *m_api;
     FritzDevice m_device;

@@ -671,8 +671,20 @@ msgstr "Gesamtenergieerzeugung"
 msgid "Net Energy (Group)"
 msgstr "Netto-Energie (Gruppe)"
 
+msgid "Net Energy"
+msgstr "Netto-Energie"
+
 msgid "Net"
 msgstr "Netto"
+
+msgid "Power configuration"
+msgstr "Stromkonfiguration"
+
+msgid "Native net power meter"
+msgstr "Nativer Netto-Leistungszähler"
+
+msgid "This device natively reports signed net power (positive=consuming, negative=producing)"
+msgstr "Dieses Gerät meldet von sich aus vorzeichenbehaftete Nettoleistung (positiv=Verbrauch, negativ=Erzeugung)"
 
 # ── Local groups ──────────────────────────────────────────────────────────────
 msgid "Local Groups"

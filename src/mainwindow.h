@@ -112,6 +112,12 @@ private:
     /// Load all producer/consumer settings from QSettings into device model.
     void loadProducerSettings();
 
+    /// Persist native net power status for a device and rebuild charts.
+    /// Called from device widget nativeNetPowerChanged signals.
+    void setDeviceNativeNetPowerStatus(const QString &ain, bool nativeNetPower);
+    /// Load all native net power settings from QSettings into device model.
+    void loadNativeNetPowerSettings();
+
     // ── Per-connection tree state persistence ───────────────────────────────
     /// Build the QSettings key prefix for the currently configured connection
     /// (host + username). Returns an empty string if either is empty.

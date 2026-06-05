@@ -56,6 +56,9 @@ public:
     /// Update producer/consumer status for a device and signal model update.
     void updateDeviceProducerStatus(const QString &ain, bool isProducer);
 
+    /// Update native net power status for a device and signal model update.
+    void updateDeviceNativeNetPowerStatus(const QString &ain, bool nativeNetPower);
+
     /// True if index points to a group-header row (not a device).
     bool isGroupHeader(const QModelIndex &index) const;
 

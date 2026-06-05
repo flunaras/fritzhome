@@ -88,6 +88,11 @@ public:
      /// \a isProducer is the new value — passed explicitly to avoid stale m_device cache.
      void updateForDeviceProducerStatusChange(bool isProducer);
 
+     /// Called by MainWindow after a device's native-net-power flag is toggled.
+     /// Rebuilds power and energy charts so the Net overlay appears/disappears.
+     /// \a nativeNetPower is the new value — passed explicitly to avoid stale cache.
+     void updateForDeviceNativeNetPowerChange(bool nativeNetPower);
+
      /// Returns the grid interval (in seconds) of the currently displayed energy
      /// history view: 900 (15-min / 24 h), 86400 (daily), 2678400 (monthly), or
      /// 0 if no energy history tab has been built yet.

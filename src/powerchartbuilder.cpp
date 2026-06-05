@@ -97,12 +97,16 @@ void PowerChartBuilder::buildPowerChart(const FritzDevice &dev,
          // Build cumulative time series: gather all unique timestamps
          const int n = energyMembers.size();
 
-         // Determine whether members have mixed producer/consumer roles.
-         bool hasProducer = false, hasConsumer = false;
+         // Determine whether members have mixed roles or any member natively
+         // reports signed net power — in those cases the net line is meaningful.
+         bool hasProducer  = false;
+         bool hasConsumer  = false;
+         bool hasNativeNet = false;
          for (const auto &m : energyMembers) {
              if (m.isProducer) hasProducer = true; else hasConsumer = true;
+             if (m.nativeNetPower) hasNativeNet = true;
          }
-         const bool hasMixedProducers = hasProducer && hasConsumer;
+         const bool hasMixedProducers = (hasProducer && hasConsumer) || hasNativeNet;
 
          QMap<qint64, QVector<double>> tsMap;
          for (int i = 0; i < n; ++i) {

@@ -84,18 +84,23 @@ SwitchWidget::SwitchWidget(FritzApi *api, QWidget *parent)
     leftLayout->addWidget(m_lockedLabel);
     leftLayout->addLayout(btnLayout);
 
-    // Producer checkbox — only visible for energy-capable devices (hasEnergyMeter()).
-    // Hidden on construction; updateDevice() shows/hides it based on device capabilities.
-    // Placed top-right to avoid increasing the widget height.
-    m_producerCheckBox = new QCheckBox(i18n("Power producer"), grp);
-    m_producerCheckBox->setToolTip(i18n("This device is a power producer (negates power/energy values in charts)"));
-    m_producerCheckBox->setVisible(false);
-
     grpLayout->addLayout(leftLayout);
-    grpLayout->addStretch();
-    grpLayout->addWidget(m_producerCheckBox, 0, Qt::AlignTop);
 
     layout->addWidget(grp);
+
+    // Power configuration group — only visible for energy-capable single devices.
+    // Contains both power-role checkboxes (mutually exclusive).
+    m_powerConfigGroup = new QGroupBox(i18n("Power configuration"), this);
+    m_powerConfigGroup->setVisible(false);
+    auto *powerConfigLayout = new QVBoxLayout(m_powerConfigGroup);
+    m_producerCheckBox = new QCheckBox(i18n("Power producer"), m_powerConfigGroup);
+    m_producerCheckBox->setToolTip(i18n("This device is a power producer (negates power/energy values in charts)"));
+    m_nativeNetCheckBox = new QCheckBox(i18n("Native net power meter"), m_powerConfigGroup);
+    m_nativeNetCheckBox->setToolTip(i18n("This device natively reports signed net power (positive=consuming, negative=producing)"));
+    powerConfigLayout->addWidget(m_producerCheckBox);
+    powerConfigLayout->addWidget(m_nativeNetCheckBox);
+    layout->addWidget(m_powerConfigGroup);
+
     layout->addStretch();
 
      // Main-button clicks → act on the group/device AIN
@@ -116,9 +121,25 @@ SwitchWidget::SwitchWidget(FritzApi *api, QWidget *parent)
             m_api->setSwitchOn(m_device.ain);
     });
 
-    // Producer checkbox: emit signal so MainWindow can persist and rebuild charts
+    // Power-role checkboxes are mutually exclusive.
+    // When one is turned ON the other is unchecked and its *Changed signal is emitted.
     connect(m_producerCheckBox, &QCheckBox::toggled, this, [this](bool checked) {
+        if (checked) {
+            m_nativeNetCheckBox->blockSignals(true);
+            m_nativeNetCheckBox->setChecked(false);
+            m_nativeNetCheckBox->blockSignals(false);
+            emit nativeNetPowerChanged(m_device.ain, false);
+        }
         emit producerStatusChanged(m_device.ain, checked);
+    });
+    connect(m_nativeNetCheckBox, &QCheckBox::toggled, this, [this](bool checked) {
+        if (checked) {
+            m_producerCheckBox->blockSignals(true);
+            m_producerCheckBox->setChecked(false);
+            m_producerCheckBox->blockSignals(false);
+            emit producerStatusChanged(m_device.ain, false);
+        }
+        emit nativeNetPowerChanged(m_device.ain, checked);
     });
 }
 
@@ -242,16 +263,18 @@ void SwitchWidget::updateDevice(const FritzDevice &device)
          m_toggleBtn->setToolTip(QString());
      }
 
-     // Show the producer checkbox only for energy-capable native devices.
-     // Groups do not expose a per-group producer flag — each member has its own.
-     // Block signals while updating the checked state to avoid a spurious
-     // producerStatusChanged emission on every poll tick.
+     // Show the power configuration group only for energy-capable native devices.
+     // Groups do not expose per-group power-role flags — each member has its own.
+     // Block signals while updating checkbox states to avoid spurious emissions.
      if (device.hasEnergyMeter() && !device.isGroup()) {
-         m_producerCheckBox->setVisible(true);
+         m_powerConfigGroup->setVisible(true);
          m_producerCheckBox->blockSignals(true);
+         m_nativeNetCheckBox->blockSignals(true);
          m_producerCheckBox->setChecked(device.isProducer);
+         m_nativeNetCheckBox->setChecked(device.nativeNetPower);
          m_producerCheckBox->blockSignals(false);
+         m_nativeNetCheckBox->blockSignals(false);
      } else {
-         m_producerCheckBox->setVisible(false);
+         m_powerConfigGroup->setVisible(false);
      }
 }

@@ -15,5 +15,6 @@ private:
     QLabel    *m_powerLabel;
     QLabel    *m_energyLabel;
     QLabel    *m_voltageLabel;
-    QCheckBox *m_producerCheckBox; ///< "This device is a power producer"
+    QCheckBox *m_producerCheckBox;  ///< "Power producer" — mutually exclusive with nativeNetPower
+    QCheckBox *m_nativeNetCheckBox; ///< "Native net power meter" — mutually exclusive with isProducer
 };

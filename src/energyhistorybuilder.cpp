@@ -921,15 +921,17 @@ void EnergyHistoryBuilder::buildEnergyHistoryChartStacked(
 
     const int nMembers = memberStats.size();
 
-    // Net overlay and legend entry are only meaningful when members have mixed
-    // producer/consumer roles — otherwise all bars point the same direction and
-    // a "net" line carries no additional information.
+    // Net overlay and legend entry are shown when members have mixed roles or any
+    // member natively reports signed net power — in those cases some bars may point
+    // in opposite directions and a "Net" line carries meaningful additional info.
     bool hasProducer  = false;
     bool hasConsumer  = false;
+    bool hasNativeNet = false;
     for (const MemberHistoryEntry &ms : memberStats) {
         if (ms.isProducer) hasProducer = true; else hasConsumer = true;
+        if (ms.nativeNetPower) hasNativeNet = true;
     }
-    const bool hasMixedProducers = hasProducer && hasConsumer;
+    const bool hasMixedProducers = (hasProducer && hasConsumer) || hasNativeNet;
     QVector<QList<double>> memberBarValues(nMembers);
 
     auto slotValue = [&](int memberIdx, int barIndex) -> double {

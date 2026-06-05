@@ -353,7 +353,9 @@ void EnergyGaugeBuilder::buildEnergyGauge(const FritzDevice &dev,
             // so display the absolute kWh value to avoid a double-negative.
             kwh          = qAbs(sign * dev.energyStats.energy / 1000.0);
             power        = sign * dev.energyStats.power;
-            energyHeading = dev.isProducer ? i18n("Total Energy Produced") : i18n("Total Energy Consumed");
+            energyHeading = dev.nativeNetPower ? i18n("Net Energy")
+                          : dev.isProducer     ? i18n("Total Energy Produced")
+                                               : i18n("Total Energy Consumed");
         }
         vl->addWidget(makeLabel(energyHeading, 11, false));
         m_gaugeKwhLabel = makeLabel(QString::number(kwh, 'f', 3) + " kWh", 28, true);

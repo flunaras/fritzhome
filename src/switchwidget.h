@@ -22,7 +22,9 @@ private:
     QToolButton *m_onBtn;
     QToolButton *m_offBtn;
     QToolButton *m_toggleBtn;
-    QCheckBox   *m_producerCheckBox = nullptr; ///< "This device is a power producer" — only shown for energy-capable devices
+    QGroupBox   *m_powerConfigGroup  = nullptr; ///< shown only for energy-capable non-group devices
+    QCheckBox   *m_producerCheckBox  = nullptr; ///< "Power producer" — mutually exclusive with nativeNetPower
+    QCheckBox   *m_nativeNetCheckBox = nullptr; ///< "Native net power meter" — mutually exclusive with isProducer
 
     FritzDeviceList m_members; // switch-capable group members; empty for single devices
 };

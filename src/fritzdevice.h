@@ -161,7 +161,11 @@ struct FritzDevice {
     QString name;            // device name
     bool present = false;            // currently reachable
     bool partiallyPresent = false;   // some members online, some offline (local groups only)
-    bool isProducer = false; // user-configured: true if device generates power (solar, battery, etc.)
+    bool isProducer = false;     // user-configured: true if device generates power (solar, battery, etc.)
+    /// True when the device natively reports a signed net power value
+    /// (positive = consuming, negative = producing).  Power values are used
+    /// as-is — no sign inversion is applied.  Mutually exclusive with isProducer.
+    bool nativeNetPower = false;
 
     // Temperature (if TEMPERATURE bit set)
     double temperature = -273.0;  // in °C

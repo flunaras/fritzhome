@@ -741,6 +741,57 @@ void ChartWidget::updateForDeviceProducerStatusChange(bool isProducer)
     });
 }
 
+void ChartWidget::updateForDeviceNativeNetPowerChange(bool nativeNetPower)
+{
+    // Sync the cached device's nativeNetPower flag before rebuilding charts.
+    // m_device is a copy and would otherwise be stale until the next poll.
+    m_device.nativeNetPower = nativeNetPower;
+
+    if (!m_device.hasEnergyMeter() && !m_device.isGroup())
+        return;
+
+    // Same rebuild sequence as updateForDeviceProducerStatusChange.
+    const QString savedTitle = plainTabText(m_tabs->tabText(m_tabs->currentIndex()));
+
+    m_tabs->blockSignals(true);
+    for (int i = m_tabs->count() - 1; i >= 0; --i) {
+        if (plainTabText(m_tabs->tabText(i)) == i18n("Power")) {
+            m_powerTabInsertIndex = i;
+            if (m_powerScrollBar)
+                m_powerScrollBar->setParent(this);
+            QWidget *old = m_tabs->widget(i);
+            m_tabs->removeTab(i);
+            delete old;
+            m_powerBuilder.reset();
+            break;
+        }
+    }
+
+    m_powerBuilder.buildPowerChart(m_device, m_memberDevices);
+    m_powerTabInsertIndex = -1;
+
+    int restoreIdx = m_tabs->currentIndex();
+    for (int i = 0; i < m_tabs->count(); ++i) {
+        if (plainTabText(m_tabs->tabText(i)) == savedTitle) {
+            restoreIdx = i;
+            break;
+        }
+    }
+    m_tabs->setCurrentIndex(restoreIdx);
+    m_tabs->blockSignals(false);
+
+    saveChartState();
+
+    replaceEnergyGaugeTab();
+
+    replaceEnergyHistoryTab([this]() {
+        if (m_historyBuilder.m_groupHistoryMode)
+            m_historyBuilder.buildEnergyHistoryChartStacked(m_historyBuilder.m_lastGroupMemberStats);
+        else
+            m_historyBuilder.buildEnergyHistoryChart(m_historyBuilder.m_lastEnergyStats);
+    });
+}
+
 // ---------------------------------------------------------------------------
 // Settings persistence — delegates builder-specific values
 // ---------------------------------------------------------------------------
