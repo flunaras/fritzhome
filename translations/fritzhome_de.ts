@@ -1069,5 +1069,47 @@ oder klicken Sie auf +, um eine neue zu erstellen.</translation>
          <translation>Unvollständige Daten – keine Historie für: %1</translation>
      </message>
 
+     <!-- ── Battery status display ────────────────────────────────────────── -->
+     <message>
+         <source>Battery Status</source>
+         <translation>Batteriestatus</translation>
+     </message>
+     <message>
+         <source>Battery level not available</source>
+         <translation>Batteriestatus nicht verfügbar</translation>
+     </message>
+     <message>
+         <source>Critical — Replace immediately</source>
+         <translation>Kritisch – Sofort austauschen</translation>
+     </message>
+     <message>
+         <source>Low battery — Replace soon</source>
+         <translation>Batterie schwach – Bald austauschen</translation>
+     </message>
+     <message>
+         <source>Low — Consider replacing</source>
+         <translation>Schwach – Austausch empfohlen</translation>
+     </message>
+     <message>
+         <source>Fair — Monitor level</source>
+         <translation>Ausreichend – Überwachen</translation>
+     </message>
+     <message>
+         <source>Good</source>
+         <translation>Gut</translation>
+     </message>
+     <message>
+         <source>Excellent</source>
+         <translation>Ausgezeichnet</translation>
+     </message>
+     <message>
+         <source>(Fritz!Box warning)</source>
+         <translation>(Fritz!Box-Warnung)</translation>
+     </message>
+     <message>
+         <source>⚠ Battery Low — Consider replacing soon</source>
+         <translation>⚠ Batterie schwach – Bald austauschen</translation>
+     </message>
+
  </context>
  </TS>

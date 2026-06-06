@@ -49,6 +49,7 @@ ChartWidget::ChartWidget(QWidget *parent)
     , m_powerBuilder(*this)
     , m_gaugeBuilder(*this)
     , m_historyBuilder(*this)
+    , m_batteryBuilder(*this)
 {
     // Save active tab whenever the user switches tabs.
     connect(m_tabs, &QTabWidget::currentChanged, this, [this](int) {
@@ -251,6 +252,12 @@ void ChartWidget::buildChartsForDevice(const FritzDevice &device,
     if (device.hasHumidity()) {
         m_powerBuilder.buildHumidityChart(device);
     }
+    if (device.hasBattery()) {
+        QWidget *batteryChart = m_batteryBuilder.buildBatteryChart(device);
+        if (batteryChart) {
+            m_tabs->addTab(batteryChart, i18n("Battery"));
+        }
+    }
 
     if (m_tabs->count() == 0) {
         QLabel *placeholder = new QLabel(i18n("No chart data available for this device."), this);
@@ -307,6 +314,7 @@ void ChartWidget::updateRollingCharts(const FritzDevice &device,
     m_tempBuilder.updateRolling(device, memberDevices);
     m_powerBuilder.updateRolling(device, memberDevices);
     m_gaugeBuilder.updateRolling(device, memberDevices);
+    m_batteryBuilder.updateBattery(device);
 
     updateScrollBar();
     applyTimeWindow();

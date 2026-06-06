@@ -745,9 +745,18 @@ FritzDeviceList FritzApi::parseDeviceListJson(const QByteArray &json) const
 
             // Battery state (device-specific; read from device JSON, not interfaces)
             bool battLow = d.value(QStringLiteral("isBatteryLow")).toBool();
+            int battValue = d.value(QStringLiteral("batteryValue")).toInt(-1);
+            
             if (dev.hasThermostat()) {
                 dev.thermostatStats.batteryLow = battLow;
-                dev.thermostatStats.battery = d.value(QStringLiteral("batteryValue")).toInt(-1);
+                dev.thermostatStats.battery = battValue;
+            }
+            
+            // Populate generic battery stats for any device with battery data
+            if (battValue >= 0) {
+                dev.batteryStats.level = battValue;
+                dev.batteryStats.low = battLow;
+                dev.batteryStats.valid = true;
             }
         }
 

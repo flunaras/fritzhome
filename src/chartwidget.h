@@ -23,6 +23,7 @@
 #include "powerchartbuilder.h"
 #include "energygaugebuilder.h"
 #include "energyhistorybuilder.h"
+#include "batterychartbuilder.h"
 
 // Forward-declare Qt types used by ChartWidget
 QT_FORWARD_DECLARE_CLASS(QTabWidget)
@@ -183,10 +184,12 @@ private:
     PowerChartBuilder       m_powerBuilder;
     EnergyGaugeBuilder      m_gaugeBuilder;
     EnergyHistoryBuilder    m_historyBuilder;
+    BatteryChartBuilder     m_batteryBuilder;
 
     // Grant builders access to shared state (m_tabs, m_device, etc.)
     friend class TemperatureChartBuilder;
     friend class PowerChartBuilder;
     friend class EnergyGaugeBuilder;
     friend class EnergyHistoryBuilder;
+    friend class BatteryChartBuilder;
 };

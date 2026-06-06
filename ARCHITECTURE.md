@@ -45,9 +45,12 @@ src/
 ├── alarmwidget.h / .cpp         Panel: door/window alarm sensor
 │
 ├── chartwidget.h / .cpp         Qt Charts time-series and energy history (orchestration + rolling charts)
-├── energyhistorybuilder.h / .cpp Energy History chart tab — single-device and stacked-group bar charts,
-│                                 warning banner for members with missing data, resolution combo, error display
-├── localgroupmanager.h / .cpp   Local group persistence — stores user-defined groups in QSettings
+├── temperaturechartbuilder.h / .cpp Time-series chart for device temperature or thermostat targets
+├── powerchartbuilder.h / .cpp       Time-series chart for device power consumption (single + stacked group)
+├── energygaugebuilder.h / .cpp      Energy gauge (live power, voltage, consumption summary)
+├── energyhistorybuilder.h / .cpp    Energy History chart tab — single-device and stacked-group bar charts, warning banner for members with missing data, resolution combo, error display
+├── batterychartbuilder.h / .cpp     Battery status display — battery level percentage with color coding, status text, and warning indicator
+├── localgroupmanager.h / .cpp       Local group persistence — stores user-defined groups in QSettings
 ├── localgroupdialog.h / .cpp    "Manage Local Groups" dialog — create, rename, delete, add/remove members
 ├── secretstore.h / .cpp         Cross-backend password storage (KWallet / libsecret / QSettings)
 └── i18n_shim.h                  i18n() macro — maps to KI18n or QCoreApplication::translate() depending on HAVE_KF
@@ -95,6 +98,7 @@ FritzDevice                     (`group` = Fritz!Box hardware group; `localGroup
 ├── BlindStats
 ├── HumidityStats
 ├── AlarmStats
+├── BatteryStats
 ├── DeviceBasicStats
 │   └── StatSeries[]
 └── History lists (temperatureHistory, powerHistory, humidityHistory)
@@ -474,6 +478,7 @@ Determines panel index by device capability priority (same order as group bucket
 | Humidity        | QLineSeries          | `dev.humidityHistory` (poll-rolling)    | No          |
 | Energy          | Static labels + optional QPieSeries (groups only) | `dev.energyStats` (live); per-member `energyStats.energy` for pie | No          |
 | Energy History  | QBarSeries (single) or QStackedBarSeries (group) + QGraphicsRectItem ghost bars + QGraphicsLineItem cap lines (group only) — rebuilt on resolution change | `DeviceBasicStats` per member from API | No          |
+| Battery         | Static display with color-coded level indicator | `dev.batteryStats` (live)               | No          |
 
 Additional UI: For group devices the Energy tab shows a per-group
 "Member Energy Distribution" pie chart (`QPieSeries` in a `QChartView`) summarising
@@ -1332,3 +1337,80 @@ This is a time-based trim (not a count-based cap), so the number of retained sam
 depends on the configured polling interval. At the default 10 s interval this yields up
 to ~8 640 samples per history list. The 24-hour window matches the maximum time-window
 combo position (`kWindowMs[8]`).
+
+---
+
+## Battery Status Display
+
+The **Battery** tab is created by `BatteryChartBuilder` for any device that reports battery
+level data (`device.hasBattery()` returns true). Devices with battery capability include:
+- Radiator controller (HKR) devices with battery backup
+- Door/window sensors powered by batteries
+- Other battery-powered Fritz!Box devices
+
+### Data Source
+
+Battery information is sourced from `FritzDevice::batteryStats`, a `BatteryStats` struct
+populated during JSON parsing in `FritzApi::parseDeviceListJson()`:
+
+- **Level (`batteryStats.level`):** battery percentage (0–100), or −1 if not available
+- **Low flag (`batteryStats.low`):** boolean flag set by Fritz!Box when battery is running low
+- **Valid flag (`batteryStats.valid`):** true if the device reports battery data
+
+### BatteryChartBuilder Implementation
+
+`BatteryChartBuilder` constructs a single stateless display widget containing:
+
+1. **Battery icon (large, 48pt)** — displays Unicode battery symbol (🔋, 🪫, etc.) reflecting level
+2. **Percentage label (32pt, bold)** — shows battery level as integer percentage or "N/A"
+3. **Status text (11pt)** — human-readable description based on level:
+   - Level < 10%: "Critical — Replace immediately"
+   - Level 10–30%: "Low battery — Replace soon"
+   - Level 30–50%: "Low — Consider replacing"
+   - Level 50–70%: "Fair — Monitor level"
+   - Level 70–90%: "Good"
+   - Level ≥ 90%: "Excellent"
+   - Level < 0: "Battery level not available"
+
+   If the Fritz!Box set the low flag (`batteryStats.low == true`), the text is appended
+   with "(Fritz!Box warning)" to indicate a firmware-level alert.
+
+4. **Progress bar (full width)** — visual indicator showing current level; only populated
+   if `batteryStats.level >= 0`
+5. **Warning banner (red background)** — displayed only when `batteryStats.low == true`:
+   shows "⚠ Battery Low — Consider replacing soon" in bold red text on light red background
+
+### Color Coding
+
+Battery level colors are mapped as follows:
+
+| Level        | Color   | Hex code | Purpose |
+|--------------|---------|----------|---------|
+| < 10%        | Red     | #d32f2f  | Critical — immediate action required |
+| 10–50%       | Orange  | #f57c00  | Low — plan replacement soon |
+| > 50%        | Green   | #388e3c  | Good — no immediate concern |
+| N/A (< 0)    | Gray    | #999999  | Data unavailable |
+
+Both the icon and percentage label adopt the mapped color. The progress bar chunk
+also uses the color.
+
+### Integration into ChartWidget
+
+- **Creation:** when `updateDevice()` encounters a device with `hasBattery() == true`, it calls
+  `m_batteryBuilder.buildBatteryChart(device)` and adds the resulting widget as a new tab
+  with label i18n("Battery").
+- **Updates:** on each rolling poll via `updateRollingCharts()`, the battery display is
+  updated in-place via `m_batteryBuilder.updateBattery(device)`, which refreshes all labels,
+  icon, progress bar, and warning banner without any tab teardown.
+- **Persistence:** `BatteryChartBuilder` has no state to persist (no time-window selection,
+  no axis scaling). The `saveState()` and `loadState()` methods are no-ops.
+- **Reset:** when switching to a different device, `updateDevice()` calls `m_batteryBuilder.reset()`
+  to delete and null all widgets.
+
+### Absence of battery data
+
+If a device is known to have battery capability but the Fritz!Box fails to return battery
+data in a particular poll, `batteryStats.level == −1` and the display shows "N/A" in gray.
+This can occur for new devices still initializing, network connectivity issues, or
+transient Fritz!Box read errors. Subsequent polls will refresh the display when data becomes
+available.

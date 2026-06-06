@@ -148,6 +148,7 @@ set(fritzhome_SRCS
     src/powerchartbuilder.cpp
     src/energygaugebuilder.cpp
     src/energyhistorybuilder.cpp
+    src/batterychartbuilder.cpp
     src/secretstore.cpp
     src/localgroupmanager.cpp
     src/localgroupdialog.cpp
@@ -174,6 +175,7 @@ set(fritzhome_HDRS
     src/powerchartbuilder.h
     src/energygaugebuilder.h
     src/energyhistorybuilder.h
+    src/batterychartbuilder.h
     src/fritzdevice.h
     src/secretstore.h
     src/localgroupmanager.h

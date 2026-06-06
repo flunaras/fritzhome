@@ -760,3 +760,34 @@ msgstr "Teilweise"
 # ── Energy history incomplete data warning ────────────────────────────────────
 msgid "Incomplete data — no history for: %1"
 msgstr "Unvollständige Daten – keine Historie für: %1"
+
+# ── Battery status display ────────────────────────────────────────────────────
+msgid "Battery Status"
+msgstr "Batteriestatus"
+
+msgid "Battery level not available"
+msgstr "Batteriestatus nicht verfügbar"
+
+msgid "Critical — Replace immediately"
+msgstr "Kritisch – Sofort austauschen"
+
+msgid "Low battery — Replace soon"
+msgstr "Batterie schwach – Bald austauschen"
+
+msgid "Low — Consider replacing"
+msgstr "Schwach – Austausch empfohlen"
+
+msgid "Fair — Monitor level"
+msgstr "Ausreichend – Überwachen"
+
+msgid "Good"
+msgstr "Gut"
+
+msgid "Excellent"
+msgstr "Ausgezeichnet"
+
+msgid "(Fritz!Box warning)"
+msgstr "(Fritz!Box-Warnung)"
+
+msgid "⚠ Battery Low — Consider replacing soon"
+msgstr "⚠ Batterie schwach – Bald austauschen"

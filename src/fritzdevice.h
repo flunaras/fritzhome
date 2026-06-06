@@ -67,6 +67,12 @@ struct DeviceBasicStats {
     QString energyStatsState;
 };
 
+struct BatteryStats {
+    int level = -1;         // battery percent (0-100), -1 if not available
+    bool low = false;       // Fritz!Box flag: battery level is low
+    bool valid = false;     // true if device reports battery info
+};
+
 struct ThermostatStats {
     int targetTemp = -1;   // in 0.5°C steps (mapped: 16=8°C, 56=28°C, 253=off, 254=on)
     int currentTemp = -1;  // in 0.1°C steps, offset by 0
@@ -180,6 +186,7 @@ struct FritzDevice {
     BlindStats blindStats;
     HumidityStats humidityStats;
     AlarmStats alarmStats;
+    BatteryStats batteryStats;
 
     // Historical data for charts (accumulated from polling)
     QList<QPair<QDateTime, double>> temperatureHistory;
@@ -202,6 +209,7 @@ struct FritzDevice {
     }
     bool hasHumidity()     const { return (functionBitmask & (1 << 20)) != 0; }
     bool hasAlarm()        const { return (functionBitmask & (1 << 4)) != 0; }
+    bool hasBattery()      const { return batteryStats.valid; }
     bool isGroup()         const { return group; }
 
     /// Classify device into its primary type bucket (first match wins).
