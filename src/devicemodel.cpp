@@ -5,6 +5,7 @@
 #include <QIcon>
 #include <QSet>
 #include <QSettings>
+#include <QPainter>
 #include <algorithm>
 #include <functional>
 #include "i18n_shim.h"
@@ -38,6 +39,86 @@ QString DeviceModel::primaryTypeLabel(const FritzDevice &dev) const
 QString DeviceModel::primaryIconName(const FritzDevice &dev) const
 {
     return dev.iconPath();
+}
+
+// ---------------------------------------------------------------------------
+// Battery overlay icon — composite icon with battery fill level visualization
+// ---------------------------------------------------------------------------
+
+QIcon DeviceModel::iconWithBatteryOverlay(const FritzDevice &dev) const
+{
+    if (!dev.hasBattery() || dev.batteryStats.level < 0) {
+        // No battery data; return plain device icon
+        return QIcon(primaryIconName(dev));
+    }
+
+    // Load base device icon
+    QIcon baseIcon(primaryIconName(dev));
+    QPixmap basePixmap = baseIcon.pixmap(QSize(32, 32));
+
+    if (basePixmap.isNull())
+        return baseIcon;  // fallback
+
+    // Create composite pixmap (same size as base)
+    QPixmap composite(basePixmap.size());
+    composite.fill(Qt::transparent);
+
+    // Draw base icon
+    {
+        QPainter p(&composite);
+        p.drawPixmap(0, 0, basePixmap);
+    }
+
+    // Draw battery icon with fill level in bottom-right corner
+    {
+        // Determine battery color based on battery level
+        QColor fillColor;
+        if (dev.batteryStats.level < 10) {
+            fillColor = QColor("#d32f2f");  // red: critical
+        } else if (dev.batteryStats.level < 50) {
+            fillColor = QColor("#f57c00");  // orange: low
+        } else {
+            fillColor = QColor("#388e3c");  // green: good
+        }
+
+        // Battery icon dimensions: 18x13 px for 32x32 icons
+        int batWidth = 18;
+        int batHeight = 13;
+        int batX = composite.width() - batWidth - 1;
+        int batY = composite.height() - batHeight - 1;
+
+        QPainter p(&composite);
+        p.setRenderHint(QPainter::Antialiasing);
+
+        // Draw battery background (white)
+        p.fillRect(batX, batY, batWidth, batHeight, Qt::white);
+
+        // Draw battery outline (dark border)
+        p.setPen(QPen(Qt::gray, 1));
+        p.drawRect(batX, batY, batWidth, batHeight);
+
+        // Draw battery terminal (small rectangle at top)
+        int termWidth = 2;
+        int termX = batX + (batWidth - termWidth) / 2;
+        p.fillRect(termX, batY - 2, termWidth, 2, Qt::gray);
+
+        // Draw fill level based on percentage
+        int fillHeight = (batHeight - 2) * dev.batteryStats.level / 100;  // -2 for padding
+        if (fillHeight > 0) {
+            int fillY = batY + batHeight - 1 - fillHeight;
+            p.fillRect(batX + 1, fillY, batWidth - 2, fillHeight, fillColor);
+        }
+
+        // Draw a thin border around the fill for definition
+        p.setPen(QPen(fillColor.darker(120), 0.5));
+        int fillHeight2 = (batHeight - 2) * dev.batteryStats.level / 100;
+        if (fillHeight2 > 0) {
+            int fillY2 = batY + batHeight - 1 - fillHeight2;
+            p.drawRect(batX + 1, fillY2, batWidth - 2, fillHeight2);
+        }
+    }
+
+    return QIcon(composite);
 }
 
 // ---------------------------------------------------------------------------
@@ -474,7 +555,7 @@ QVariant DeviceModel::data(const QModelIndex &index, int role) const
     }
 
     if (role == Qt::DecorationRole && index.column() == ColName)
-        return QIcon(primaryIconName(dev));
+        return iconWithBatteryOverlay(dev);
 
     if (role == Qt::ToolTipRole) {
         QString tip = QString("<b>%1</b><br/>").arg(dev.name);
@@ -502,7 +583,34 @@ QVariant DeviceModel::data(const QModelIndex &index, int role) const
                 return QString::number(raw);
             };
             tip += QString("Target: %1<br/>").arg(t2c(dev.thermostatStats.targetTemp));
-            tip += QString("Battery: %1%<br/>").arg(dev.thermostatStats.battery);
+            // Only add battery line if not already covered by generic battery status below
+            if (!dev.hasBattery() || dev.batteryStats.level < 0)
+                tip += QString("Battery: %1%<br/>").arg(dev.thermostatStats.battery);
+        }
+        if (dev.hasBattery() && dev.batteryStats.level >= 0) {
+            // Generate status text based on battery level and low flag
+            auto getBatteryStatusText = [](int level, bool lowFlag) -> QString {
+                QString status;
+                if (level < 10) {
+                    status = i18n("Critical — Replace immediately");
+                } else if (level < 30) {
+                    status = i18n("Low battery — Replace soon");
+                } else if (level < 50) {
+                    status = i18n("Low — Consider replacing");
+                } else if (level < 70) {
+                    status = i18n("Fair — Monitor level");
+                } else if (level < 90) {
+                    status = i18n("Good");
+                } else {
+                    status = i18n("Excellent");
+                }
+                if (lowFlag) {
+                    status += i18n(" (Fritz!Box warning)");
+                }
+                return status;
+            };
+            tip += QString("Battery: %1% — %2<br/>").arg(dev.batteryStats.level)
+                .arg(getBatteryStatusText(dev.batteryStats.level, dev.batteryStats.low));
         }
         if (dev.hasHumidity() && dev.humidityStats.valid)
             tip += QString("Humidity: %1%<br/>").arg(dev.humidityStats.humidity);

@@ -83,6 +83,7 @@ private:
     void rebuildGroups(const FritzDeviceList &devices);
     QString primaryTypeLabel(const FritzDevice &dev) const;
     QString primaryIconName(const FritzDevice &dev) const;
+    QIcon iconWithBatteryOverlay(const FritzDevice &dev) const;
     QString deviceStatusString(const FritzDevice &dev) const;
 
     /// Compute the displayed (signed) power value for a device leaf.
