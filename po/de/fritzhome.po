@@ -762,6 +762,9 @@ msgid "Incomplete data — no history for: %1"
 msgstr "Unvollständige Daten – keine Historie für: %1"
 
 # ── Battery status display ────────────────────────────────────────────────────
+msgid "Battery"
+msgstr "Batterie"
+
 msgid "Battery Status"
 msgstr "Batteriestatus"
 
@@ -791,3 +794,33 @@ msgstr "(Fritz!Box-Warnung)"
 
 msgid "⚠ Battery Low — Consider replacing soon"
 msgstr "⚠ Batterie schwach – Bald austauschen"
+
+msgid "Product: %1 (%2)<br/>"
+msgstr "Produkt: %1 (%2)<br/>"
+
+msgid "Firmware: %1<br/>"
+msgstr "Firmware: %1<br/>"
+
+msgid "Switch: %1<br/>"
+msgstr "Schalter: %1<br/>"
+
+msgid "Power: %1 W<br/>"
+msgstr "Leistung: %1 W<br/>"
+
+msgid "Energy: %1 Wh<br/>"
+msgstr "Energie: %1 Wh<br/>"
+
+msgid "Voltage: %1 V<br/>"
+msgstr "Spannung: %1 V<br/>"
+
+msgid "Target: %1<br/>"
+msgstr "Solltemperatur: %1<br/>"
+
+msgid "Battery: %1%<br/>"
+msgstr "Batterie: %1 %<br/>"
+
+msgid "Battery: %1% — %2<br/>"
+msgstr "Batterie: %1 % — %2<br/>"
+
+msgid "Humidity: %1%<br/>"
+msgstr "Luftfeuchtigkeit: %1 %<br/>"

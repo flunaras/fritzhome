@@ -1110,6 +1110,46 @@ oder klicken Sie auf +, um eine neue zu erstellen.</translation>
          <source>⚠ Battery Low — Consider replacing soon</source>
          <translation>⚠ Batterie schwach – Bald austauschen</translation>
      </message>
+     <message>
+         <source>Product: %1 (%2)&lt;br/&gt;</source>
+         <translation>Produkt: %1 (%2)&lt;br/&gt;</translation>
+     </message>
+     <message>
+         <source>Firmware: %1&lt;br/&gt;</source>
+         <translation>Firmware: %1&lt;br/&gt;</translation>
+     </message>
+     <message>
+         <source>Switch: %1&lt;br/&gt;</source>
+         <translation>Schalter: %1&lt;br/&gt;</translation>
+     </message>
+     <message>
+         <source>Power: %1 W&lt;br/&gt;</source>
+         <translation>Leistung: %1 W&lt;br/&gt;</translation>
+     </message>
+     <message>
+         <source>Energy: %1 Wh&lt;br/&gt;</source>
+         <translation>Energie: %1 Wh&lt;br/&gt;</translation>
+     </message>
+     <message>
+         <source>Voltage: %1 V&lt;br/&gt;</source>
+         <translation>Spannung: %1 V&lt;br/&gt;</translation>
+     </message>
+     <message>
+         <source>Target: %1&lt;br/&gt;</source>
+         <translation>Solltemperatur: %1&lt;br/&gt;</translation>
+     </message>
+     <message>
+         <source>Battery: %1%&lt;br/&gt;</source>
+         <translation>Batterie: %1 %&lt;br/&gt;</translation>
+     </message>
+     <message>
+         <source>Battery: %1% — %2&lt;br/&gt;</source>
+         <translation>Batterie: %1 % — %2&lt;br/&gt;</translation>
+     </message>
+     <message>
+         <source>Humidity: %1%&lt;br/&gt;</source>
+         <translation>Luftfeuchtigkeit: %1 %&lt;br/&gt;</translation>
+     </message>
 
  </context>
  </TS>

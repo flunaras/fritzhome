@@ -560,19 +560,19 @@ QVariant DeviceModel::data(const QModelIndex &index, int role) const
     if (role == Qt::ToolTipRole) {
         QString tip = QString("<b>%1</b><br/>").arg(dev.name);
         tip += QString("AIN: %1<br/>").arg(dev.identifier);
-        tip += QString("Product: %1 (%2)<br/>").arg(dev.productname, dev.manufacturer);
-        tip += QString("Firmware: %1<br/>").arg(dev.fwversion);
+        tip += i18n("Product: %1 (%2)<br/>", dev.productname, dev.manufacturer);
+        tip += i18n("Firmware: %1<br/>", dev.fwversion);
         if (dev.hasSwitch())
-            tip += QString("Switch: %1<br/>").arg(dev.switchStats.on ? i18n("On") : i18n("Off"));
+            tip += i18n("Switch: %1<br/>", dev.switchStats.on ? i18n("On") : i18n("Off"));
         if (dev.hasEnergyMeter() && dev.energyStats.valid) {
             const double sign = dev.isProducer ? -1.0 : 1.0;
             // Power: use the signed-aggregation helper so hardware groups
             // honour each member's producer flag.  Energy still uses the raw
             // sign-from-isProducer value (an aggregate-energy helper is a
             // separate concern; not part of this fix).
-            tip += QString("Power: %1 W<br/>").arg(signedPowerForDisplay(dev), 0, 'f', 1);
-            tip += QString("Energy: %1 Wh<br/>").arg(sign * dev.energyStats.energy, 0, 'f', 0);
-            tip += QString("Voltage: %1 V<br/>").arg(dev.energyStats.voltage, 0, 'f', 1);
+            tip += i18n("Power: %1 W<br/>", QString::number(signedPowerForDisplay(dev), 'f', 1));
+            tip += i18n("Energy: %1 Wh<br/>", QString::number(sign * dev.energyStats.energy, 'f', 0));
+            tip += i18n("Voltage: %1 V<br/>", QString::number(dev.energyStats.voltage, 'f', 1));
         }
         if (dev.hasThermostat()) {
             auto t2c = [](int raw) -> QString {
@@ -582,10 +582,10 @@ QVariant DeviceModel::data(const QModelIndex &index, int role) const
                     return QString("%1 °C").arg(8.0 + (raw - 16) * 0.5, 0, 'f', 1);
                 return QString::number(raw);
             };
-            tip += QString("Target: %1<br/>").arg(t2c(dev.thermostatStats.targetTemp));
+            tip += i18n("Target: %1<br/>", t2c(dev.thermostatStats.targetTemp));
             // Only add battery line if not already covered by generic battery status below
             if (!dev.hasBattery() || dev.batteryStats.level < 0)
-                tip += QString("Battery: %1%<br/>").arg(dev.thermostatStats.battery);
+                tip += i18n("Battery: %1%<br/>", dev.thermostatStats.battery);
         }
         if (dev.hasBattery() && dev.batteryStats.level >= 0) {
             // Generate status text based on battery level and low flag
@@ -609,11 +609,12 @@ QVariant DeviceModel::data(const QModelIndex &index, int role) const
                 }
                 return status;
             };
-            tip += QString("Battery: %1% — %2<br/>").arg(dev.batteryStats.level)
-                .arg(getBatteryStatusText(dev.batteryStats.level, dev.batteryStats.low));
+            tip += i18n("Battery: %1% — %2<br/>",
+                        QString::number(dev.batteryStats.level),
+                        getBatteryStatusText(dev.batteryStats.level, dev.batteryStats.low));
         }
         if (dev.hasHumidity() && dev.humidityStats.valid)
-            tip += QString("Humidity: %1%<br/>").arg(dev.humidityStats.humidity);
+            tip += i18n("Humidity: %1%<br/>", dev.humidityStats.humidity);
         return tip;
     }
 
