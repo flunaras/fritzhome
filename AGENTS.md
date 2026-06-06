@@ -414,7 +414,9 @@ public:
    - Uninitialized variables (use `Q_ASSERT()` or assertions in debug builds if needed)
    - Memory leaks (particularly in chart teardown and DeviceModel reset flows)
 
-5. **Cross-version testing:** if touching async, signals, or translation code, test both Qt5 and Qt6 builds in Docker:
+5. **Translation coverage:** if adding new user-visible strings, ensure they are wrapped in `i18n()` via `i18n_shim.h` and added to both `po/de/fritzhome.po` (KF builds) and `translations/fritzhome_de.ts` (no-KF builds).
+
+6. **Cross-version testing:** if touching async, signals, or translation code, test both Qt5 and Qt6 builds in Docker:
    ```bash
    ./docker/build.sh --distro opensuse-leap-15.6-x86_64 --build-type Release   # Qt5
    ./docker/build.sh --distro opensuse-tumbleweed-x86_64 --build-type Release  # Qt6
@@ -954,6 +956,7 @@ git push origin feature/my-feature
 - [ ] Updated AGENTS.md if introducing new architectural patterns or best practices
 - [ ] Added docstrings for public classes explaining single responsibility
 - [ ] Complex methods documented with inline comments explaining "why"
+- [ ] All user-visible strings wrapped in `i18n()` via `i18n_shim.h`; new strings added to both `po/de/fritzhome.po` (KF builds) and `translations/fritzhome_de.ts` (no-KF builds)
 
 ### Adding a New Device Widget
 
