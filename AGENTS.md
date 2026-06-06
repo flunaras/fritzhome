@@ -262,6 +262,13 @@ if (panel) {
 - **Document why OOP patterns were chosen:** when extracting a method into a separate class, explain the reason
   - Example: `// EnergyHistoryBuilder: separate builder for complex chart construction. Allows testing with mock data.`
   - This helps future maintainers understand the design intent
+- **Update external documentation** when code changes affect:
+  - **ARCHITECTURE.md:** new architectural patterns, design decisions, class hierarchies, data flow changes
+  - **README.md:** new features, user-facing behavior changes, new device types, updated build/CLI instructions
+  - **AGENTS.md:** new best practices, common pitfalls, code quality patterns, build/release workflows
+  - **Build system docs:** changes to CMakeLists.txt, dependencies, Qt/KF version handling, cross-compilation
+  - **Deployment/release process:** updates to versioning, packaging, or release workflow
+  - *Rationale:* future developers and maintainers rely on accurate documentation to understand and extend the system
 
 ### Version Compatibility
 
@@ -943,7 +950,8 @@ git push origin feature/my-feature
 - [ ] Builds on at least one distro profile: `./docker/build.sh --distro opensuse-tumbleweed-x86_64 --build-type Release`
 - [ ] If modifying async/signals/translation, tested on both Qt5 and Qt6 profiles
 - [ ] Commit message format: `verb: Component short description` (e.g., `fix: FritzApi memory leak`)
-- [ ] Updated AGENTS.md if introducing new architectural patterns
+- [ ] Updated relevant documentation (ARCHITECTURE.md, README.md, etc.) if changes affect architecture, features, build process, or workflows
+- [ ] Updated AGENTS.md if introducing new architectural patterns or best practices
 - [ ] Added docstrings for public classes explaining single responsibility
 - [ ] Complex methods documented with inline comments explaining "why"
 
