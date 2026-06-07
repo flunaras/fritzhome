@@ -1,5 +1,6 @@
 #include "thermostatwidget.h"
 #include "fritzapi.h"
+#include "chartutils.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QFormLayout>
@@ -113,10 +114,11 @@ void ThermostatWidget::updateDevice(const FritzDevice &device)
     // Battery
     if (hkr.battery >= 0) {
         m_batteryLabel->setText(QString("%1%").arg(hkr.battery));
-        if (hkr.batteryLow)
-            m_batteryLabel->setStyleSheet("color: red; font-weight: bold;");
-        else
-            m_batteryLabel->setStyleSheet("");
+            // Use normalized 5-state battery color scheme
+            QColor color = batteryColorForLevel(hkr.battery);
+            m_batteryLabel->setStyleSheet(QString("color: %1; font-weight: %2;")
+                .arg(color.name())
+                .arg(hkr.battery < kBatteryEmpty ? "bold" : "normal"));
     }
 
     // Window

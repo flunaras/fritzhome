@@ -1,5 +1,6 @@
 #include "devicemodel.h"
 #include "localgroupmanager.h"
+#include "chartutils.h"
 #include <QColor>
 #include <QFont>
 #include <QIcon>
@@ -71,15 +72,8 @@ QIcon DeviceModel::iconWithBatteryOverlay(const FritzDevice &dev) const
 
     // Draw battery icon with fill level in bottom-right corner
     {
-        // Determine battery color based on battery level
-        QColor fillColor;
-        if (dev.batteryStats.level < 10) {
-            fillColor = QColor("#d32f2f");  // red: critical
-        } else if (dev.batteryStats.level < 50) {
-            fillColor = QColor("#f57c00");  // orange: low
-        } else {
-            fillColor = QColor("#388e3c");  // green: good
-        }
+        // Determine battery color based on battery level (uses 5-state normalization)
+        QColor fillColor = batteryColorForLevel(dev.batteryStats.level);
 
         // Battery icon dimensions: horizontal battery in the bottom-right corner.
         int batWidth = 18;
@@ -590,30 +584,11 @@ QVariant DeviceModel::data(const QModelIndex &index, int role) const
                 tip += i18n("Battery: %1%<br/>", dev.thermostatStats.battery);
         }
         if (dev.hasBattery() && dev.batteryStats.level >= 0) {
-            // Generate status text based on battery level and low flag
-            auto getBatteryStatusText = [](int level, bool lowFlag) -> QString {
-                QString status;
-                if (level < 10) {
-                    status = i18n("Critical — Replace immediately");
-                } else if (level < 30) {
-                    status = i18n("Low battery — Replace soon");
-                } else if (level < 50) {
-                    status = i18n("Low — Consider replacing");
-                } else if (level < 70) {
-                    status = i18n("Fair — Monitor level");
-                } else if (level < 90) {
-                    status = i18n("Good");
-                } else {
-                    status = i18n("Excellent");
-                }
-                if (lowFlag) {
-                    status += i18n(" (Fritz!Box warning)");
-                }
-                return status;
-            };
+            // Generate status text based on battery level (uses 5-state normalization)
+            QString status = batteryStatusTextForLevel(dev.batteryStats.level, dev.batteryStats.low);
             tip += i18n("Battery: %1% — %2<br/>",
                         QString::number(dev.batteryStats.level),
-                        getBatteryStatusText(dev.batteryStats.level, dev.batteryStats.low));
+                        status);
         }
         if (dev.hasHumidity() && dev.humidityStats.valid)
             tip += i18n("Humidity: %1%<br/>", dev.humidityStats.humidity);

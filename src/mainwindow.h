@@ -149,6 +149,8 @@ private:
     void fetchGroupOrDeviceStats(const FritzDevice &dev, const FritzDeviceList &memberDevs);
     /// Synthesize group-level switch state (lock, mixed, partial) from members.
     void synthesizeGroupSwitchState(FritzDevice &dev, DeviceWidget *dw) const;
+    /// Get 32x32 icon pixmap for device heading, with battery overlay if applicable.
+    QPixmap deviceHeadingPixmap(const FritzDevice &dev);
 
     // Core objects
     FritzApi          *m_api                = nullptr;

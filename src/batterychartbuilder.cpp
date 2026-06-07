@@ -2,6 +2,7 @@
 /// \brief Implementation of BatteryChartBuilder — battery status display with color-coded levels.
 
 #include "batterychartbuilder.h"
+#include "chartutils.h"
 #include "fritzdevice.h"
 #include "i18n_shim.h"
 
@@ -11,6 +12,7 @@
 #include <QFont>
 #include <QSettings>
 #include <QProgressBar>
+#include <QPainter>
 
 // ---------------------------------------------------------------------------
 // Constructor
@@ -46,11 +48,8 @@ QWidget *BatteryChartBuilder::buildBatteryChart(const FritzDevice &device)
     QHBoxLayout *levelLayout = new QHBoxLayout();
 
     m_batteryIconLabel = new QLabel(m_batteryContainer);
-    QFont iconFont = m_batteryIconLabel->font();
-    iconFont.setPointSize(48);
-    m_batteryIconLabel->setFont(iconFont);
     m_batteryIconLabel->setAlignment(Qt::AlignCenter);
-    m_batteryIconLabel->setMinimumWidth(80);
+    m_batteryIconLabel->setFixedSize(96, 64);
     levelLayout->addWidget(m_batteryIconLabel);
 
     QVBoxLayout *infoLayout = new QVBoxLayout();
@@ -120,10 +119,7 @@ void BatteryChartBuilder::updateBattery(const FritzDevice &device)
     }
 
     // Update icon
-    m_batteryIconLabel->setText(batteryIcon(bs.level));
-    m_batteryIconLabel->setStyleSheet(
-        QString("QLabel { color: %1; }").arg(colorForLevel(bs.level).name())
-    );
+    m_batteryIconLabel->setPixmap(batteryIconPixmap(bs.level));
 
     // Update status text
     m_statusLabel->setText(statusText(bs.level, bs.low));
@@ -178,46 +174,61 @@ void BatteryChartBuilder::loadState()
 
 QColor BatteryChartBuilder::colorForLevel(int level) const
 {
-    if (level < 0) return QColor("#999999");  // gray for N/A
-    if (level < 10) return QColor("#d32f2f"); // red: critical
-    if (level < 50) return QColor("#f57c00"); // orange/yellow: low
-    return QColor("#388e3c");                 // green: good
+    return batteryColorForLevel(level);
 }
 
-QString BatteryChartBuilder::batteryIcon(int level) const
+QPixmap BatteryChartBuilder::batteryIconPixmap(int level) const
 {
-    // Unicode battery icons from various ranges
-    if (level < 0) return "🔋";              // generic battery
-    if (level < 20) return "🪫";             // empty battery
-    if (level < 40) return "🔋";             // low battery
-    if (level < 60) return "🔋";             // medium battery
-    if (level < 80) return "🔋";             // high battery
-    return "🔋";                             // full battery
+    // Paint our own icon instead of using emoji glyphs so stylesheet/system
+    // emoji-color rendering cannot override the intended battery color.
+    const int w = 78;
+    const int h = 44;
+    const int terminalW = 6;
+    const int bodyW = w - terminalW - 2;
+    const int bodyH = h - 10;
+    const int x = terminalW+1;
+    const int y = (h - bodyH) / 2;
+
+    QPixmap pm(w, h);
+    pm.fill(Qt::transparent);
+
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+
+    QColor fill = colorForLevel(level);
+    QColor border = QColor("#404040");
+    if (level < 0) {
+        fill = QColor("#999999");
+        border = QColor("#666666");
+    }
+
+    // Battery body and terminal.
+    QRect bodyRect(x, y, bodyW, bodyH);
+    QRect terminalRect(1, y + bodyH / 3, terminalW, bodyH / 3);
+
+    p.setPen(QPen(border, 2));
+    p.setBrush(Qt::NoBrush);
+    p.drawRoundedRect(bodyRect, 4, 4);
+    p.drawRect(terminalRect);
+
+    // Inner fill based on level.
+    const QRect inner = bodyRect.adjusted(3, 3, -3, -3);
+    if (level >= 0) {
+        const int clamped = qBound(0, level, 100);
+        const int fillW = qMax(0, (inner.width() * clamped) / 100);
+        if (fillW > 0) {
+            QRect fillRect(inner.x() + inner.width() - fillW, inner.y(), fillW, inner.height());
+            p.fillRect(fillRect, fill);
+        }
+    } else {
+        // N/A state: diagonal hatch conveys unknown level.
+        p.fillRect(inner, QBrush(fill, Qt::BDiagPattern));
+    }
+
+    return pm;
 }
 
 QString BatteryChartBuilder::statusText(int level, bool lowFlag) const
 {
-    if (level < 0)
-        return i18n("Battery level not available");
-
-    QString status;
-    if (level < 10) {
-        status = i18n("Critical — Replace immediately");
-    } else if (level < 30) {
-        status = i18n("Low battery — Replace soon");
-    } else if (level < 50) {
-        status = i18n("Low — Consider replacing");
-    } else if (level < 70) {
-        status = i18n("Fair — Monitor level");
-    } else if (level < 90) {
-        status = i18n("Good");
-    } else {
-        status = i18n("Excellent");
-    }
-
-    if (lowFlag) {
-        status += i18n(" (Fritz!Box warning)");
-    }
-
-    return status;
+    return batteryStatusTextForLevel(level, lowFlag);
 }

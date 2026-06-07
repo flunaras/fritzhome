@@ -75,10 +75,11 @@ enum PanelIndex {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Returns the appropriate 32x32 icon pixmap for the heading of the details panel.
-static QPixmap deviceHeadingPixmap(const FritzDevice &dev)
+// Returns the appropriate 32x32 icon pixmap for the heading of the details panel,
+// including battery overlay if the device has battery status.
+QPixmap MainWindow::deviceHeadingPixmap(const FritzDevice &dev)
 {
-    return QIcon(dev.iconPath()).pixmap(32, 32);
+    return m_model->iconWithBatteryOverlay(dev).pixmap(32, 32);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -62,6 +62,9 @@ public:
     /// True if index points to a group-header row (not a device).
     bool isGroupHeader(const QModelIndex &index) const;
 
+    /// Get a device icon with battery overlay (if device has battery status).
+    QIcon iconWithBatteryOverlay(const FritzDevice &dev) const;
+
     // QAbstractItemModel interface
     QModelIndex index(int row, int column,
                       const QModelIndex &parent = QModelIndex()) const override;
@@ -83,7 +86,6 @@ private:
     void rebuildGroups(const FritzDeviceList &devices);
     QString primaryTypeLabel(const FritzDevice &dev) const;
     QString primaryIconName(const FritzDevice &dev) const;
-    QIcon iconWithBatteryOverlay(const FritzDevice &dev) const;
     QString deviceStatusString(const FritzDevice &dev) const;
 
     /// Compute the displayed (signed) power value for a device leaf.

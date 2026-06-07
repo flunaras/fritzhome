@@ -525,3 +525,51 @@ QList<QPointF> downsampleMinMax(const QList<QPointF> &points)
 
     return out;
 }
+
+// ── Battery state normalization ──────────────────────────────────────────────
+
+QColor batteryColorForLevel(int level)
+{
+    if (level < 0) return QColor("#999999");      // gray: N/A
+    if (level < 20) return QColor("#d32f2f");     // red: critical (0–20%)
+    if (level < 40) return QColor("#f57c00");     // orange: low (20–40%)
+    if (level < 60) return QColor("#fbc02d");     // yellow: fair (40–60%)
+    if (level < 80) return QColor("#7cb342");     // light green: good (60–80%)
+    return QColor("#388e3c");                     // dark green: excellent (80–100%)
+}
+
+QString batteryIconForLevel(int level)
+{
+    // Unicode battery icons for visual representation of battery level.
+    // Different icons or styling could represent each state.
+    if (level < 0) return "🔋";                  // generic battery (N/A)
+    if (level < 20) return "🪫";                 // empty battery (critical)
+    if (level < 40) return "🔋";                 // battery (low)
+    if (level < 60) return "🔋";                 // battery (fair)
+    if (level < 80) return "🔋";                 // battery (good)
+    return "🔋";                                 // battery (excellent)
+}
+
+QString batteryStatusTextForLevel(int level, bool lowFlag)
+{
+    QString status;
+    if (level < 0) {
+        status = i18n("Battery level not available");
+    } else if (level < 20) {
+        status = i18n("Critical — Replace immediately");
+    } else if (level < 40) {
+        status = i18n("Low — Replace soon");
+    } else if (level < 60) {
+        status = i18n("Fair — Monitor level");
+    } else if (level < 80) {
+        status = i18n("Good");
+    } else {
+        status = i18n("Excellent");
+    }
+
+    if (lowFlag && level >= 0) {
+        status += i18n(" (Fritz!Box warning)");
+    }
+
+    return status;
+}

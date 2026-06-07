@@ -5,6 +5,7 @@
 
 #include <QWidget>
 #include <QPointer>
+#include <QPixmap>
 
 class FritzDevice;
 
@@ -51,8 +52,8 @@ private:
     /// Return color for battery level: green > 50%, yellow 10-50%, red < 10%.
     QColor colorForLevel(int level) const;
 
-    /// Return battery icon (as Unicode character) for the given level.
-    QString batteryIcon(int level) const;
+    /// Render a battery icon pixmap whose fill color reflects normalized level.
+    QPixmap batteryIconPixmap(int level) const;
 
     /// Return descriptive status text for the battery level.
     QString statusText(int level, bool lowFlag) const;

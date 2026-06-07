@@ -162,3 +162,25 @@ constexpr int kMaxSeriesPoints = 2000;
 /// If \a points already contains kMaxSeriesPoints or fewer entries, it is
 /// returned unmodified (zero-copy via implicit sharing).
 QList<QPointF> downsampleMinMax(const QList<QPointF> &points);
+
+// ── Battery state normalization ──────────────────────────────────────────────
+
+/// Battery level thresholds for 5-state normalization (0-20-40-60-80-100).
+/// All battery displays use these thresholds for consistent UI.
+constexpr int kBatteryEmpty = 20;    ///< Critical: 0–20%
+constexpr int kBatteryLow = 40;      ///< Low: 20–40%
+constexpr int kBatteryFair = 60;     ///< Fair: 40–60%
+constexpr int kBatteryGood = 80;     ///< Good: 60–80%
+///                                      Excellent: 80–100%
+
+/// Get the normalized battery state color for the given battery level (0–100).
+/// Returns gray (#999999) if level < 0 (N/A).
+QColor batteryColorForLevel(int level);
+
+/// Get the battery icon (unicode) for the given battery level (0–100).
+/// Returns generic battery emoji "🔋" for N/A (level < 0).
+QString batteryIconForLevel(int level);
+
+/// Get the human-readable status text for the given battery level and low flag.
+/// Translatable status descriptions for the 5 battery states plus N/A.
+QString batteryStatusTextForLevel(int level, bool lowFlag);
