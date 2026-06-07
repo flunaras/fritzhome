@@ -81,40 +81,42 @@ QIcon DeviceModel::iconWithBatteryOverlay(const FritzDevice &dev) const
             fillColor = QColor("#388e3c");  // green: good
         }
 
-        // Battery icon dimensions: 18x13 px for 32x32 icons
+        // Battery icon dimensions: horizontal battery in the bottom-right corner.
         int batWidth = 18;
-        int batHeight = 13;
+        int batHeight = 12;
         int batX = composite.width() - batWidth - 1;
         int batY = composite.height() - batHeight - 1;
 
         QPainter p(&composite);
         p.setRenderHint(QPainter::Antialiasing);
 
-        // Draw battery background (white)
-        p.fillRect(batX, batY, batWidth, batHeight, Qt::white);
+        // Draw battery body background (white)
+        QRect bodyRect(batX, batY, batWidth, batHeight);
+        p.fillRect(bodyRect, Qt::white);
 
-        // Draw battery outline (dark border)
-        p.setPen(QPen(Qt::gray, 1));
-        p.drawRect(batX, batY, batWidth, batHeight);
+        // Draw battery outline (black border)
+        p.setPen(QPen(Qt::black, 1));
+        p.drawRect(bodyRect);
 
-        // Draw battery terminal (small rectangle at top)
-        int termWidth = 2;
-        int termX = batX + (batWidth - termWidth) / 2;
-        p.fillRect(termX, batY - 2, termWidth, 2, Qt::gray);
+        // Draw battery terminal on the left to make the overlay horizontal.
+        QRect terminalRect(batX - 3,
+                           batY + (batHeight / 2) - 3,
+                           2,
+                           6);
+        p.fillRect(terminalRect, Qt::darkGray);
 
-        // Draw fill level based on percentage
-        int fillHeight = (batHeight - 2) * dev.batteryStats.level / 100;  // -2 for padding
-        if (fillHeight > 0) {
-            int fillY = batY + batHeight - 1 - fillHeight;
-            p.fillRect(batX + 1, fillY, batWidth - 2, fillHeight, fillColor);
-        }
+        // Draw fill level based on percentage.
+        int fillWidth = (bodyRect.width() - 2) * dev.batteryStats.level / 100;
+        if (fillWidth > 0) {
+            QRect fillRect(bodyRect.x() + (bodyRect.width() - fillWidth - 1),  // right-align fill
+                           bodyRect.y() + 1,
+                           fillWidth,
+                           bodyRect.height() - 2);
+            p.fillRect(fillRect, fillColor);
 
-        // Draw a thin border around the fill for definition
-        p.setPen(QPen(fillColor.darker(120), 0.5));
-        int fillHeight2 = (batHeight - 2) * dev.batteryStats.level / 100;
-        if (fillHeight2 > 0) {
-            int fillY2 = batY + batHeight - 1 - fillHeight2;
-            p.drawRect(batX + 1, fillY2, batWidth - 2, fillHeight2);
+            // Draw a thin border around the fill for definition.
+            p.setPen(QPen(fillColor.darker(120), 0.5));
+            p.drawRect(fillRect);
         }
     }
 
