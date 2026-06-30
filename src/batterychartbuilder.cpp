@@ -13,6 +13,7 @@
 #include <QSettings>
 #include <QProgressBar>
 #include <QPainter>
+#include <QPainterPath>
 
 // ---------------------------------------------------------------------------
 // Constructor
@@ -49,7 +50,7 @@ QWidget *BatteryChartBuilder::buildBatteryChart(const FritzDevice &device)
 
     m_batteryIconLabel = new QLabel(m_batteryContainer);
     m_batteryIconLabel->setAlignment(Qt::AlignCenter);
-    m_batteryIconLabel->setFixedSize(96, 64);
+    m_batteryIconLabel->setFixedSize(78, 44);
     levelLayout->addWidget(m_batteryIconLabel);
 
     QVBoxLayout *infoLayout = new QVBoxLayout();
@@ -181,12 +182,14 @@ QPixmap BatteryChartBuilder::batteryIconPixmap(int level) const
 {
     // Paint our own icon instead of using emoji glyphs so stylesheet/system
     // emoji-color rendering cannot override the intended battery color.
+    // Orientation is flipped 180°: terminal sits on the right, fill grows from the left.
     const int w = 78;
     const int h = 44;
-    const int terminalW = 6;
-    const int bodyW = w - terminalW - 2;
-    const int bodyH = h - 10;
-    const int x = terminalW+1;
+    const int terminalVisible = 5; // visible width of the terminal nub past the body edge
+    const int borderW = 2;         // pen width for body outline
+    const int bodyW = w - terminalVisible - borderW;
+    const int bodyH = h - 8;
+    const int x = borderW / 2 + 1; // leave room for the pen stroke on the left
     const int y = (h - bodyH) / 2;
 
     QPixmap pm(w, h);
@@ -202,28 +205,40 @@ QPixmap BatteryChartBuilder::batteryIconPixmap(int level) const
         border = QColor("#666666");
     }
 
-    // Battery body and terminal.
+    // 1. Battery body outline first (white-filled rounded rectangle with a dark stroke).
     QRect bodyRect(x, y, bodyW, bodyH);
-    QRect terminalRect(1, y + bodyH / 3, terminalW, bodyH / 3);
-
-    p.setPen(QPen(border, 2));
+    p.setPen(QPen(border, borderW, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
     p.setBrush(Qt::NoBrush);
-    p.drawRoundedRect(bodyRect, 4, 4);
-    p.drawRect(terminalRect);
+    p.drawRoundedRect(bodyRect, 3, 3);
 
-    // Inner fill based on level.
+    // 2. Inner fill based on level (left-aligned to match flipped terminal).
     const QRect inner = bodyRect.adjusted(3, 3, -3, -3);
     if (level >= 0) {
         const int clamped = qBound(0, level, 100);
         const int fillW = qMax(0, (inner.width() * clamped) / 100);
         if (fillW > 0) {
-            QRect fillRect(inner.x() + inner.width() - fillW, inner.y(), fillW, inner.height());
-            p.fillRect(fillRect, fill);
+            QRectF fillRect(inner.x(), inner.y(), fillW, inner.height());
+            QPainterPath fillPath;
+            fillPath.addRoundedRect(fillRect, 1.5, 1.5);
+            p.fillPath(fillPath, fill);
         }
     } else {
         // N/A state: diagonal hatch conveys unknown level.
         p.fillRect(inner, QBrush(fill, Qt::BDiagPattern));
     }
+
+    // 3. Terminal nub drawn on top of the body's right edge: a solid filled
+    //    rounded rectangle in the border color. Its left side sits exactly
+    //    on the body's right edge so there is no gap; the body stroke at
+    //    that point is hidden behind the nub. Result: a single continuous
+    //    silhouette that reads as a battery.
+    const int terminalH = bodyH / 2;
+    const int terminalW = terminalVisible + borderW / 2;
+    const int terminalX = bodyRect.right() - borderW / 2 + 1;
+    const int terminalY = y + (bodyH - terminalH) / 2;
+    QPainterPath termPath;
+    termPath.addRoundedRect(QRectF(terminalX, terminalY, terminalW, terminalH), 1.5, 1.5);
+    p.fillPath(termPath, border);
 
     return pm;
 }

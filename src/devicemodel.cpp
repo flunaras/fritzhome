@@ -76,9 +76,15 @@ QIcon DeviceModel::iconWithBatteryOverlay(const FritzDevice &dev) const
         QColor fillColor = batteryColorForLevel(dev.batteryStats.level);
 
         // Battery icon dimensions: horizontal battery in the bottom-right corner.
-        int batWidth = 18;
-        int batHeight = 12;
-        int batX = composite.width() - batWidth - 1;
+        // Orientation is flipped 180°: terminal sits on the right, fill grows from the left.
+        // The terminal is placed flush with the right edge so the whole glyph hugs
+        // the corner; the body sits to the left of the terminal (plus a 1 px gap).
+        int batWidth   = 18;
+        int batHeight  = 12;
+        int terminalW  = 2;
+        int terminalH  = 6;
+        int terminalGap = 1;
+        int batX = composite.width() - batWidth - terminalGap - terminalW;
         int batY = composite.height() - batHeight - 1;
 
         QPainter p(&composite);
@@ -92,17 +98,17 @@ QIcon DeviceModel::iconWithBatteryOverlay(const FritzDevice &dev) const
         p.setPen(QPen(Qt::black, 1));
         p.drawRect(bodyRect);
 
-        // Draw battery terminal on the left to make the overlay horizontal.
-        QRect terminalRect(batX - 3,
-                           batY + (batHeight / 2) - 3,
-                           2,
-                           6);
+        // Draw battery terminal on the right (180°-flipped orientation), flush with edge.
+        QRect terminalRect(batX + batWidth + terminalGap,
+                           batY + (batHeight - terminalH) / 2,
+                           terminalW,
+                           terminalH);
         p.fillRect(terminalRect, Qt::darkGray);
 
-        // Draw fill level based on percentage.
+        // Draw fill level based on percentage (left-aligned to match flipped terminal).
         int fillWidth = (bodyRect.width() - 2) * dev.batteryStats.level / 100;
         if (fillWidth > 0) {
-            QRect fillRect(bodyRect.x() + (bodyRect.width() - fillWidth - 1),  // right-align fill
+            QRect fillRect(bodyRect.x() + 1,  // left-align fill (flipped)
                            bodyRect.y() + 1,
                            fillWidth,
                            bodyRect.height() - 2);
