@@ -746,7 +746,13 @@ FritzDeviceList FritzApi::parseDeviceListJson(const QByteArray &json) const
             // Battery state (device-specific; read from device JSON, not interfaces)
             bool battLow = d.value(QStringLiteral("isBatteryLow")).toBool();
             int battValue = d.value(QStringLiteral("batteryValue")).toInt(-1);
-            
+            // Some devices (e.g. FRITZ!Smart Energy 250) support both battery
+            // and external (USB/mains) power. "isExternallyPowered" reflects
+            // the live-detected current power source; "isBatteryPowered"
+            // just says the device is capable of running on battery.
+            bool battPowered = d.value(QStringLiteral("isBatteryPowered")).toBool();
+            bool extPowered  = d.value(QStringLiteral("isExternallyPowered")).toBool();
+
             if (dev.hasThermostat()) {
                 dev.thermostatStats.batteryLow = battLow;
                 dev.thermostatStats.battery = battValue;
@@ -757,6 +763,8 @@ FritzDeviceList FritzApi::parseDeviceListJson(const QByteArray &json) const
                 dev.batteryStats.level = battValue;
                 dev.batteryStats.low = battLow;
                 dev.batteryStats.valid = true;
+                dev.batteryStats.batteryPowered = battPowered;
+                dev.batteryStats.externallyPowered = extPowered;
             }
         }
 

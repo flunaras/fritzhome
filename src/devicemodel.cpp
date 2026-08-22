@@ -48,8 +48,10 @@ QString DeviceModel::primaryIconName(const FritzDevice &dev) const
 
 QIcon DeviceModel::iconWithBatteryOverlay(const FritzDevice &dev) const
 {
-    if (!dev.hasBattery() || dev.batteryStats.level < 0) {
-        // No battery data; return plain device icon
+    if (!dev.hasBattery() || dev.batteryStats.level < 0 || dev.isExternallyPowered()) {
+        // No battery data, or the device is currently confirmed to be
+        // running on external (USB/mains) power — skip the battery overlay
+        // since the reported level does not reflect the active power source.
         return QIcon(primaryIconName(dev));
     }
 
@@ -590,11 +592,17 @@ QVariant DeviceModel::data(const QModelIndex &index, int role) const
                 tip += i18n("Battery: %1%<br/>", dev.thermostatStats.battery);
         }
         if (dev.hasBattery() && dev.batteryStats.level >= 0) {
-            // Generate status text based on battery level (uses 5-state normalization)
-            QString status = batteryStatusTextForLevel(dev.batteryStats.level, dev.batteryStats.low);
-            tip += i18n("Battery: %1% — %2<br/>",
-                        QString::number(dev.batteryStats.level),
-                        status);
+            if (dev.isExternallyPowered()) {
+                // Device supports battery but is currently confirmed to be
+                // running on external (USB/mains) power by the Fritz!Box.
+                tip += i18n("Power source: External (USB/Mains)<br/>");
+            } else {
+                // Generate status text based on battery level (uses 5-state normalization)
+                QString status = batteryStatusTextForLevel(dev.batteryStats.level, dev.batteryStats.low);
+                tip += i18n("Battery: %1% — %2<br/>",
+                            QString::number(dev.batteryStats.level),
+                            status);
+            }
         }
         if (dev.hasHumidity() && dev.humidityStats.valid)
             tip += i18n("Humidity: %1%<br/>", dev.humidityStats.humidity);

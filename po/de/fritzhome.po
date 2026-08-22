@@ -795,6 +795,9 @@ msgstr "(Fritz!Box-Warnung)"
 msgid "⚠ Battery Low — Consider replacing soon"
 msgstr "⚠ Batterie schwach – Bald austauschen"
 
+msgid "🔌 Currently powered via USB/Mains (battery not in use)"
+msgstr "🔌 Aktuell über USB/Netzteil versorgt (Batterie nicht in Verwendung)"
+
 msgid "Product: %1 (%2)<br/>"
 msgstr "Produkt: %1 (%2)<br/>"
 
@@ -821,6 +824,9 @@ msgstr "Batterie: %1 %<br/>"
 
 msgid "Battery: %1% — %2<br/>"
 msgstr "Batterie: %1 % — %2<br/>"
+
+msgid "Power source: External (USB/Mains)<br/>"
+msgstr "Stromquelle: Extern (USB/Netzteil)<br/>"
 
 msgid "Humidity: %1%<br/>"
 msgstr "Luftfeuchtigkeit: %1 %<br/>"

@@ -71,6 +71,13 @@ struct BatteryStats {
     int level = -1;         // battery percent (0-100), -1 if not available
     bool low = false;       // Fritz!Box flag: battery level is low
     bool valid = false;     // true if device reports battery info
+
+    // Some devices (e.g. FRITZ!Smart Energy 250) support both battery and
+    // external (USB/mains) power. "isExternallyPowered" reflects the
+    // Fritz!Box's live detection of the current power source, independent
+    // of "isBatteryPowered" (the device's general battery capability).
+    bool batteryPowered = false;      // device supports running on battery
+    bool externallyPowered = false;   // currently powered via USB/mains
 };
 
 struct ThermostatStats {
@@ -210,6 +217,9 @@ struct FritzDevice {
     bool hasHumidity()     const { return (functionBitmask & (1 << 20)) != 0; }
     bool hasAlarm()        const { return (functionBitmask & (1 << 4)) != 0; }
     bool hasBattery()      const { return batteryStats.valid; }
+    /// True if the device is currently confirmed by the Fritz!Box to be
+    /// running on external (USB/mains) power rather than its battery.
+    bool isExternallyPowered() const { return batteryStats.externallyPowered; }
     bool isGroup()         const { return group; }
 
     /// Classify device into its primary type bucket (first match wins).

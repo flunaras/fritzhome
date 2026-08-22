@@ -85,6 +85,18 @@ QWidget *BatteryChartBuilder::buildBatteryChart(const FritzDevice &device)
     m_warningLabel->setVisible(false);
     layout->addWidget(m_warningLabel);
 
+    // External power notice (shown when the Fritz!Box reports the device is
+    // currently running on USB/mains power rather than its battery).
+    m_externalPowerLabel = new QLabel(m_batteryContainer);
+    QFont externalFont = m_externalPowerLabel->font();
+    externalFont.setPointSize(10);
+    externalFont.setBold(true);
+    m_externalPowerLabel->setFont(externalFont);
+    m_externalPowerLabel->setAlignment(Qt::AlignLeft);
+    m_externalPowerLabel->setStyleSheet("QLabel { color: #2e7d32; padding: 10px; background-color: #e8f5e9; border-radius: 4px; }");
+    m_externalPowerLabel->setVisible(false);
+    layout->addWidget(m_externalPowerLabel);
+
     // Progress bar for visual indication
     m_progressBar = new QProgressBar(m_batteryContainer);
     m_progressBar->setAlignment(Qt::AlignCenter);
@@ -125,12 +137,23 @@ void BatteryChartBuilder::updateBattery(const FritzDevice &device)
     // Update status text
     m_statusLabel->setText(statusText(bs.level, bs.low));
 
-    // Update warning label
-    if (bs.low) {
+    // Update warning label — suppressed while running on external power,
+    // since the reported battery level is not currently in use.
+    if (bs.low && !bs.externallyPowered) {
         m_warningLabel->setText(i18n("⚠ Battery Low — Consider replacing soon"));
         m_warningLabel->setVisible(true);
     } else {
         m_warningLabel->setVisible(false);
+    }
+
+    // External power notice
+    if (m_externalPowerLabel) {
+        if (bs.externallyPowered) {
+            m_externalPowerLabel->setText(i18n("🔌 Currently powered via USB/Mains (battery not in use)"));
+            m_externalPowerLabel->setVisible(true);
+        } else {
+            m_externalPowerLabel->setVisible(false);
+        }
     }
 
     // Update progress bar

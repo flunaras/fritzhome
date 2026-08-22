@@ -1111,6 +1111,10 @@ oder klicken Sie auf +, um eine neue zu erstellen.</translation>
          <translation>⚠ Batterie schwach – Bald austauschen</translation>
      </message>
      <message>
+         <source>🔌 Currently powered via USB/Mains (battery not in use)</source>
+         <translation>🔌 Aktuell über USB/Netzteil versorgt (Batterie nicht in Verwendung)</translation>
+     </message>
+     <message>
          <source>Product: %1 (%2)&lt;br/&gt;</source>
          <translation>Produkt: %1 (%2)&lt;br/&gt;</translation>
      </message>
@@ -1145,6 +1149,10 @@ oder klicken Sie auf +, um eine neue zu erstellen.</translation>
      <message>
          <source>Battery: %1% — %2&lt;br/&gt;</source>
          <translation>Batterie: %1 % — %2&lt;br/&gt;</translation>
+     </message>
+     <message>
+         <source>Power source: External (USB/Mains)&lt;br/&gt;</source>
+         <translation>Stromquelle: Extern (USB/Netzteil)&lt;br/&gt;</translation>
      </message>
      <message>
          <source>Humidity: %1%&lt;br/&gt;</source>

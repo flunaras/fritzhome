@@ -47,6 +47,7 @@ private:
     QPointer<class QLabel> m_batteryIconLabel;
     QPointer<class QLabel> m_statusLabel;
     QPointer<class QLabel> m_warningLabel;
+    QPointer<class QLabel> m_externalPowerLabel;
     QPointer<class QProgressBar> m_progressBar;
 
     /// Return color for battery level: green > 50%, yellow 10-50%, red < 10%.

@@ -1347,15 +1347,33 @@ level data (`device.hasBattery()` returns true). Devices with battery capability
 - Radiator controller (HKR) devices with battery backup
 - Door/window sensors powered by batteries
 - Other battery-powered Fritz!Box devices
+- Dual-powered devices that support both battery and external (USB/mains) power, such as the
+  FRITZ!Smart Energy 250 power meter
 
 ### Data Source
 
 Battery information is sourced from `FritzDevice::batteryStats`, a `BatteryStats` struct
-populated during JSON parsing in `FritzApi::parseDeviceListJson()`:
+populated during JSON parsing in `FritzApi::parseDeviceListJson()` from the top-level
+`device` JSON object (not the `unit`/`interfaces` sub-object):
 
-- **Level (`batteryStats.level`):** battery percentage (0–100), or −1 if not available
-- **Low flag (`batteryStats.low`):** boolean flag set by Fritz!Box when battery is running low
+- **Level (`batteryStats.level`):** battery percentage (0–100), or −1 if not available.
+  Sourced from JSON field `batteryValue`.
+- **Low flag (`batteryStats.low`):** boolean flag set by Fritz!Box when battery is running low.
+  Sourced from JSON field `isBatteryLow`.
 - **Valid flag (`batteryStats.valid`):** true if the device reports battery data
+  (`batteryValue >= 0`).
+- **Battery-powered flag (`batteryStats.batteryPowered`):** true if the device is generally
+  capable of running on battery. Sourced from JSON field `isBatteryPowered`.
+- **Externally-powered flag (`batteryStats.externallyPowered`):** true if the Fritz!Box
+  currently detects the device as running on external (USB/mains) power rather than its
+  battery. Sourced from JSON field `isExternallyPowered`. Exposed via the convenience
+  method `FritzDevice::isExternallyPowered()`.
+
+Some devices (e.g. FRITZ!Smart Energy 250) support both battery and USB/mains power
+simultaneously; `isExternallyPowered` reflects the live-detected *current* power source,
+independent of the device's general battery capability (`isBatteryPowered`) or the reported
+battery percentage (which remains available as a fallback level even while externally
+powered).
 
 ### BatteryChartBuilder Implementation
 
@@ -1377,8 +1395,16 @@ populated during JSON parsing in `FritzApi::parseDeviceListJson()`:
 
 4. **Progress bar (full width)** — visual indicator showing current level; only populated
    if `batteryStats.level >= 0`
-5. **Warning banner (red background)** — displayed only when `batteryStats.low == true`:
-   shows "⚠ Battery Low — Consider replacing soon" in bold red text on light red background
+5. **Warning banner (red background)** — displayed only when `batteryStats.low == true`
+   **and** the device is not currently externally powered: shows
+   "⚠ Battery Low — Consider replacing soon" in bold red text on light red background.
+   Suppressed while `batteryStats.externallyPowered == true` since the battery is not in
+   active use.
+6. **External power banner (green background)** — displayed only when
+   `batteryStats.externallyPowered == true`: shows
+   "🔌 Currently powered via USB/Mains (battery not in use)" in bold green text on light
+   green background, informing the user the device is not currently drawing from its
+   battery.
 
 ### Color Coding
 
@@ -1401,7 +1427,7 @@ also uses the color.
   with label i18n("Battery").
 - **Updates:** on each rolling poll via `updateRollingCharts()`, the battery display is
   updated in-place via `m_batteryBuilder.updateBattery(device)`, which refreshes all labels,
-  icon, progress bar, and warning banner without any tab teardown.
+  icon, progress bar, warning banner, and external-power banner without any tab teardown.
 - **Persistence:** `BatteryChartBuilder` has no state to persist (no time-window selection,
   no axis scaling). The `saveState()` and `loadState()` methods are no-ops.
 - **Reset:** when switching to a different device, `updateDevice()` calls `m_batteryBuilder.reset()`
@@ -1414,3 +1440,20 @@ data in a particular poll, `batteryStats.level == −1` and the display shows "N
 This can occur for new devices still initializing, network connectivity issues, or
 transient Fritz!Box read errors. Subsequent polls will refresh the display when data becomes
 available.
+
+### External power detection (dual-powered devices)
+
+For devices that support both battery and external power, the reported `batteryValue` and
+`isBatteryLow` fields continue to be returned by the Fritz!Box even while the device is
+running on external power (they reflect the battery's own state, not whether it's in use).
+The app therefore relies specifically on `isExternallyPowered` — not on the battery
+percentage or low flag — to determine the *active* power source:
+
+- **Device tree icon** (`DeviceModel::iconWithBatteryOverlay()` in `src/devicemodel.cpp`):
+  the battery-fill overlay is skipped entirely when `dev.isExternallyPowered()` is true, so
+  the icon does not show a misleading battery level for a device that isn't drawing from
+  its battery.
+- **Device tree tooltip** (`DeviceModel::data()` in `src/devicemodel.cpp`): shows
+  "Power source: External (USB/Mains)" instead of the battery percentage line when
+  externally powered.
+- **Battery tab** (`BatteryChartBuilder`): see banner behavior above.
