@@ -15,9 +15,17 @@
 #include <QPen>
 #include <QMap>
 #include <QVector>
+#include <QEvent>
+#include <QMouseEvent>
+#include <QGraphicsLineItem>
+#include <QGraphicsRectItem>
+#include <QGraphicsSimpleTextItem>
 #include <limits>
+#include <algorithm>
 
 #include <QtCharts/QChart>
+#include <QtCharts/QChartView>
+#include <QtCharts/QAbstractSeries>
 #include <QtCharts/QLineSeries>
 #include <QtCharts/QAreaSeries>
 #include <QtCharts/QDateTimeAxis>
@@ -153,6 +161,13 @@ void PowerChartBuilder::buildPowerChart(const FritzDevice &dev,
              area->attachAxis(axisX);
              area->attachAxis(axisY);
 
+             // Any attached series can serve as the coordinate-mapping
+             // reference for hover handling; the first stacked layer is a
+             // safe default (overridden below by the net line, if present,
+             // since it spans the full net time range).
+             if (i == 0)
+                 m_hoverMappingSeries = area;
+
          // Store pointers for in-place rolling updates
          m_powerStackedUpper.append(upper);
          m_powerStackedLower.append(lower);
@@ -177,11 +192,12 @@ void PowerChartBuilder::buildPowerChart(const FritzDevice &dev,
          }
          netLine->replace(downsampleMinMax(netPts));
 
-         chart->addSeries(netLine);
-         netLine->attachAxis(axisX);
-         netLine->attachAxis(axisY);
-         m_powerNetSeries = netLine;
-     }
+          chart->addSeries(netLine);
+          netLine->attachAxis(axisX);
+          netLine->attachAxis(axisY);
+          m_powerNetSeries = netLine;
+          m_hoverMappingSeries = netLine;
+      }
 
      // Store energy members for rolling update
      m_owner.m_memberDevices = energyMembers;
@@ -214,7 +230,9 @@ void PowerChartBuilder::buildPowerChart(const FritzDevice &dev,
         tmpWindowCombo->setCurrentIndex(qBound(0, m_owner.m_windowComboIndex, 8));
         QObject::connect(tmpWindowCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), &m_owner,
                 [this](int idx){ m_owner.m_windowComboIndex = idx; m_owner.onWindowComboChanged(idx); m_owner.saveChartState(); });
-        QWidget *tab = makeChartTab(chart, currentText, &m_powerValueLabel, m_owner.m_powerScrollBar, m_powerLockCheckBox, tmpWindowCombo);
+        QPointer<QChartView> viewPtr;
+        QWidget *tab = makeChartTab(chart, currentText, &m_powerValueLabel, m_owner.m_powerScrollBar, m_powerLockCheckBox, tmpWindowCombo, &viewPtr);
+        installHoverGraphics(viewPtr);
         if (m_owner.m_powerTabInsertIndex >= 0)
             m_owner.m_tabs->insertTab(m_owner.m_powerTabInsertIndex, tab, i18n("Power"));
         else
@@ -262,6 +280,7 @@ void PowerChartBuilder::buildPowerChart(const FritzDevice &dev,
          chart->addSeries(area);
          area->attachAxis(axisX);
          area->attachAxis(axisY);
+         m_hoverMappingSeries = area;
 
          if (!dev.powerHistory.isEmpty()) {
              double minP = 0.0, maxP = 0.0;
@@ -297,7 +316,9 @@ void PowerChartBuilder::buildPowerChart(const FritzDevice &dev,
         tmpWindowCombo->setCurrentIndex(qBound(0, m_owner.m_windowComboIndex, 8));
         QObject::connect(tmpWindowCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), &m_owner,
                 [this](int idx){ m_owner.m_windowComboIndex = idx; m_owner.onWindowComboChanged(idx); m_owner.saveChartState(); });
-        QWidget *tab = makeChartTab(chart, currentText, &m_powerValueLabel, m_owner.m_powerScrollBar, m_powerLockCheckBox, tmpWindowCombo);
+        QPointer<QChartView> viewPtr;
+        QWidget *tab = makeChartTab(chart, currentText, &m_powerValueLabel, m_owner.m_powerScrollBar, m_powerLockCheckBox, tmpWindowCombo, &viewPtr);
+        installHoverGraphics(viewPtr);
         if (m_owner.m_powerTabInsertIndex >= 0)
             m_owner.m_tabs->insertTab(m_owner.m_powerTabInsertIndex, tab, i18n("Power"));
         else
@@ -607,6 +628,15 @@ void PowerChartBuilder::reset()
     m_powerNetSeries   = nullptr;
 
     m_humiditySeries = nullptr;
+
+    // Hover graphics are owned by the QChartView/scene being torn down right
+    // after reset() runs (see ChartWidget::updateDevice), so it is safe to
+    // simply drop our raw pointers here without deleting anything ourselves.
+    m_powerChartView = nullptr;
+    m_hoverLine      = nullptr;
+    m_hoverInfoBg    = nullptr;
+    m_hoverInfoText  = nullptr;
+    m_hoverMappingSeries = nullptr;
 }
 
 void PowerChartBuilder::nullifyWidgetPointers(QWidget *w)
@@ -640,4 +670,198 @@ void PowerChartBuilder::loadState()
     m_powerScaleLocked = s.value(QStringLiteral("chart/powerScaleLocked"), false).toBool();
     m_lockedPowerMin   = s.value(QStringLiteral("chart/lockedPowerMin"),   0.0).toDouble();
     m_lockedPowerMax   = s.value(QStringLiteral("chart/lockedPowerMax"),   10.0).toDouble();
+}
+
+// ── Hover crosshair / persistent tooltip ────────────────────────────────────
+
+void PowerChartBuilder::installHoverGraphics(QChartView *view)
+{
+    if (!view || !m_powerChart)
+        return;
+
+    m_powerChartView = view;
+    view->setMouseTracking(true);
+    view->viewport()->setMouseTracking(true);
+    // Forwarded via ChartWidget::eventFilter — see ownsViewport()/handleHoverEvent().
+    view->viewport()->installEventFilter(&m_owner);
+
+    // Vertical dotted crosshair, parented to m_powerChart so its coordinate
+    // system matches plotArea() / mapToValue() / mapToPosition() directly.
+    m_hoverLine = new QGraphicsLineItem(m_powerChart);
+    QPen hoverPen(QColor(80, 80, 80));
+    hoverPen.setStyle(Qt::DotLine);
+    hoverPen.setWidth(1);
+    m_hoverLine->setPen(hoverPen);
+    m_hoverLine->setZValue(100);
+    m_hoverLine->hide();
+
+    // Persistent tooltip box — added directly to the scene (view/scene
+    // coordinates) so it can be freely positioned near the cursor. Unlike
+    // QToolTip it has no auto-hide timer; it is only hidden explicitly in
+    // hideHoverCrosshair().
+    m_hoverInfoBg = new QGraphicsRectItem();
+    m_hoverInfoBg->setBrush(QColor(255, 255, 225, 235));
+    m_hoverInfoBg->setPen(QPen(QColor(120, 120, 120)));
+    m_hoverInfoBg->setZValue(101);
+    m_hoverInfoBg->hide();
+    view->scene()->addItem(m_hoverInfoBg);
+
+    m_hoverInfoText = new QGraphicsSimpleTextItem(m_hoverInfoBg);
+    m_hoverInfoText->setPos(6, 4);
+    m_hoverInfoText->setBrush(QColor(20, 20, 20));
+}
+
+bool PowerChartBuilder::ownsViewport(QObject *watched) const
+{
+    return m_powerChartView && watched == m_powerChartView->viewport();
+}
+
+void PowerChartBuilder::handleHoverEvent(QEvent *event)
+{
+    if (!m_powerChart || !m_powerChartView || !m_hoverLine)
+        return;
+
+    switch (event->type()) {
+    case QEvent::MouseMove: {
+        auto *mouseEvent = static_cast<QMouseEvent *>(event);
+        const QPointF posInChart =
+            m_powerChart->mapFromScene(m_powerChartView->mapToScene(mouseEvent->pos()));
+        const QRectF plotArea = m_powerChart->plotArea();
+
+        // Use the series that is actually attached to the axes (the
+        // QAreaSeries / net line) for coordinate mapping — the boundary
+        // line series (m_powerSeries / m_powerStackedUpper entries) are
+        // never themselves attached, so mapping against them silently
+        // produces bogus coordinates.
+        QAbstractSeries *refSeries = m_hoverMappingSeries;
+
+        if (!refSeries || !plotArea.contains(posInChart)) {
+            hideHoverCrosshair();
+            break;
+        }
+
+        const double targetXMs = m_powerChart->mapToValue(posInChart, refSeries).x();
+        const qint64 nearestTs = findNearestTimestamp(static_cast<qint64>(targetXMs));
+
+        // Snap the crosshair to the sample's exact timestamp (not the raw
+        // mouse X) so it lines up with the actual data point.
+        const QPointF snappedPos = m_powerChart->mapToPosition(
+            QPointF(static_cast<double>(nearestTs), 0.0), refSeries);
+        m_hoverLine->setLine(snappedPos.x(), plotArea.top(),
+                             snappedPos.x(), plotArea.bottom());
+        m_hoverLine->show();
+
+        m_hoverInfoText->setText(formatTooltip(nearestTs));
+        positionHoverInfoBox(mouseEvent->pos());
+        m_hoverInfoBg->show();
+        break;
+    }
+    case QEvent::Leave:
+        hideHoverCrosshair();
+        break;
+    default:
+        break;
+    }
+}
+
+qint64 PowerChartBuilder::findNearestTimestamp(qint64 targetMs) const
+{
+    // Use the raw (un-downsampled) history of a single reference device so
+    // the crosshair always snaps to a real polled sample, regardless of how
+    // aggressively the display series was downsampled.
+    const QList<QPair<QDateTime, double>> *ref = !m_owner.m_memberDevices.isEmpty()
+        ? &m_owner.m_memberDevices.first().powerHistory
+        : &m_owner.m_device.powerHistory;
+
+    if (ref->isEmpty())
+        return targetMs;
+
+    auto it = std::lower_bound(ref->begin(), ref->end(), targetMs,
+                               [](const QPair<QDateTime, double> &p, qint64 value) {
+                                   return p.first.toMSecsSinceEpoch() < value;
+                               });
+
+    if (it == ref->begin())
+        return it->first.toMSecsSinceEpoch();
+    if (it == ref->end())
+        return (ref->end() - 1)->first.toMSecsSinceEpoch();
+
+    const qint64 afterTs  = it->first.toMSecsSinceEpoch();
+    const qint64 beforeTs = (it - 1)->first.toMSecsSinceEpoch();
+    return (targetMs - beforeTs <= afterTs - targetMs) ? beforeTs : afterTs;
+}
+
+QString PowerChartBuilder::formatTooltip(qint64 tsMs) const
+{
+    // Nearest-value lookup for a single device's history near tsMs — mirrors
+    // findNearestTimestamp()'s binary search but returns the associated power
+    // value instead of the timestamp.
+    auto valueNear = [](const QList<QPair<QDateTime, double>> &history, qint64 ts) -> double {
+        if (history.isEmpty())
+            return 0.0;
+        auto it = std::lower_bound(history.begin(), history.end(), ts,
+                                   [](const QPair<QDateTime, double> &p, qint64 value) {
+                                       return p.first.toMSecsSinceEpoch() < value;
+                                   });
+        if (it == history.begin())
+            return it->second;
+        if (it == history.end())
+            return (history.end() - 1)->second;
+        const qint64 afterTs  = it->first.toMSecsSinceEpoch();
+        const qint64 beforeTs = (it - 1)->first.toMSecsSinceEpoch();
+        return (ts - beforeTs <= afterTs - ts) ? (it - 1)->second : it->second;
+    };
+
+    const QDateTime dt = QDateTime::fromMSecsSinceEpoch(tsMs);
+    QString text = dt.toString(QStringLiteral("hh:mm:ss"));
+
+    if (!m_owner.m_memberDevices.isEmpty()) {
+        double net = 0.0;
+        for (const FritzDevice &member : m_owner.m_memberDevices) {
+            const double raw = valueNear(member.powerHistory, tsMs);
+            const double value = member.isProducer ? -raw : raw;
+            net += value;
+            text += QStringLiteral("\n%1: %2 W").arg(member.name).arg(value, 0, 'f', 1);
+        }
+        if (m_powerNetSeries)
+            text += QStringLiteral("\n%1: %2 W").arg(i18n("Net")).arg(net, 0, 'f', 1);
+    } else {
+        const double raw = valueNear(m_owner.m_device.powerHistory, tsMs);
+        const double value = m_owner.m_device.isProducer ? -raw : raw;
+        text += QStringLiteral("\n%1: %2 W").arg(i18n("Power")).arg(value, 0, 'f', 1);
+    }
+
+    return text;
+}
+
+void PowerChartBuilder::hideHoverCrosshair()
+{
+    if (m_hoverLine)
+        m_hoverLine->hide();
+    if (m_hoverInfoBg)
+        m_hoverInfoBg->hide();
+}
+
+void PowerChartBuilder::positionHoverInfoBox(const QPoint &viewportPos)
+{
+    if (!m_hoverInfoText || !m_hoverInfoBg || !m_powerChartView)
+        return;
+
+    const QRectF textRect = m_hoverInfoText->boundingRect();
+    const QRectF bgRect(0, 0, textRect.width() + 12, textRect.height() + 8);
+    m_hoverInfoBg->setRect(bgRect);
+
+    // Anchor near the cursor, offset down-right by default, flipping to the
+    // opposite side when it would overflow the viewport so the box always
+    // stays fully visible.
+    const QSize viewSize = m_powerChartView->viewport()->size();
+    qreal x = viewportPos.x() + 16;
+    qreal y = viewportPos.y() + 16;
+    if (x + bgRect.width() > viewSize.width())
+        x = viewportPos.x() - bgRect.width() - 16;
+    if (y + bgRect.height() > viewSize.height())
+        y = viewportPos.y() - bgRect.height() - 16;
+
+    const QPointF scenePos = m_powerChartView->mapToScene(QPoint(qRound(x), qRound(y)));
+    m_hoverInfoBg->setPos(scenePos);
 }

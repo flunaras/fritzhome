@@ -512,6 +512,40 @@ The rescue guard at the top of each builder (`buildTemperatureChart`,
 reparents the combo back to `this` (so it survives the tab teardown); if null it
 recreates the combo with items and signal wiring from scratch.
 
+### Power chart hover crosshair + persistent tooltip
+
+The Power tab shows a vertical dotted crosshair line and a data tooltip while the mouse
+hovers over the plot area, mirroring the pattern used in `solakon-one-ui`'s
+`PvChartWidget`. Unlike `QToolTip` (used by the Energy History bar chart, see below),
+this tooltip has **no auto-hide timer** — it stays visible until the mouse leaves the
+chart view, which lets the user linger over a reading without it disappearing.
+
+- `PowerChartBuilder::installHoverGraphics()` is called once per Power-tab (re)build
+  (both the single-device and stacked-group code paths in `buildPowerChart()`). It
+  installs a mouse-tracking event filter on the `QChartView`'s viewport and creates the
+  graphics items: a `QGraphicsLineItem` crosshair (parented to `m_powerChart` so its
+  coordinates match `plotArea()`/`mapToValue()`/`mapToPosition()` directly) and a
+  persistent tooltip box (`QGraphicsRectItem` + `QGraphicsSimpleTextItem`) added directly
+  to the view's `QGraphicsScene` so it can be freely positioned near the cursor.
+- The event filter is registered on `&m_owner` (`ChartWidget`), which already implements
+  `eventFilter()` for other purposes. `ChartWidget::eventFilter()` checks
+  `m_powerBuilder.ownsViewport(watched)` first and forwards `QEvent::MouseMove` /
+  `QEvent::Leave` to `PowerChartBuilder::handleHoverEvent()`.
+- `handleHoverEvent()` maps the mouse position to a chart X value, calls
+  `findNearestTimestamp()` to snap to the closest **actual polled sample** (binary search
+  over the raw, un-downsampled `powerHistory` of the reference device — not the display
+  series, which may be downsampled via `downsampleMinMax()`), and draws the crosshair at
+  that exact timestamp's screen position.
+- `formatTooltip()` builds a multi-line tooltip: `hh:mm:ss` timestamp, then one line per
+  group member (`name: value W`, sign-adjusted for `isProducer`) plus a `Net: value W`
+  line when the net overlay series exists (mixed producer/consumer groups or
+  `nativeNetPower`), or a single `Power: value W` line for a non-group device.
+- On device switch, `PowerChartBuilder::reset()` nulls the hover graphics pointers
+  (`m_powerChartView`, `m_hoverLine`, `m_hoverInfoBg`, `m_hoverInfoText`) *before*
+  `ChartWidget::teardownTabs()` deletes the old tab widget/QChartView/scene — the graphics
+  items themselves are owned by the (now-deleted) scene/chart, so no manual cleanup is
+  needed; only the dangling raw pointers must be dropped.
+
 ### Energy History bar chart details
 
 - Bars are oldest-left, newest-right; the rightmost bar represents the still-accumulating

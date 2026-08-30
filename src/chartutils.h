@@ -103,11 +103,14 @@ QWidget *createErrorDisplayWidget(const QString &caption, const QStringList &err
 
 /// Create a chart tab container with value label overlay, optional scroll bar,
 /// optional lock checkbox, and optional time-window combo.
+/// \a outView, when non-null, receives the QChartView created internally so
+/// callers can install hover/tooltip event filters on its viewport.
 QWidget *makeChartTab(QChart *chart, const QString &currentValueText,
                       QPointer<QLabel> *outLabel = nullptr,
                       QScrollBar *scrollBar = nullptr,
                       QCheckBox *lockCheckBox = nullptr,
-                      QComboBox *windowCombo = nullptr);
+                      QComboBox *windowCombo = nullptr,
+                      QPointer<QChartView> *outView = nullptr);
 
 // ── Tab-text utility ────────────────────────────────────────────────────────
 

@@ -15,6 +15,17 @@
 #include "chartutils.h"
 #include "fritzdevice.h"
 
+QT_FORWARD_DECLARE_CLASS(QGraphicsLineItem)
+QT_FORWARD_DECLARE_CLASS(QGraphicsRectItem)
+QT_FORWARD_DECLARE_CLASS(QGraphicsSimpleTextItem)
+QT_FORWARD_DECLARE_CLASS(QEvent)
+// QAbstractSeries is already made visible (via QT_CHARTS_USE_NAMESPACE) by
+// the QtCharts headers pulled in through chartutils.h above — do NOT forward
+// declare it again here: under Qt5 it lives in the QtCharts:: namespace, and
+// a bare QT_FORWARD_DECLARE_CLASS(QAbstractSeries) would create a clashing
+// *global*-namespace declaration (see energyhistorybuilder.h for the same
+// issue with `using QtCharts::QAbstractSeries;`).
+
 class ChartWidget;
 
 /// Builds and manages the Power and Humidity chart tabs.
@@ -54,6 +65,25 @@ public:
     void saveState() const;
     void loadState();
 
+    // -- Hover crosshair / persistent tooltip ------------------------------
+    // Called once per power-tab (re)build; installs a mouse-tracking event
+    // filter on the view's viewport (forwarded via ChartWidget::eventFilter,
+    // since QGraphicsView::viewport() is a child widget of ChartWidget's tab
+    // hierarchy) and creates the crosshair line + tooltip graphics items.
+    void installHoverGraphics(QChartView *view);
+
+    /// Returns true when \a watched is the viewport of the power chart's
+    /// QChartView — used by ChartWidget::eventFilter() to decide whether to
+    /// forward the event to handleHoverEvent().
+    bool ownsViewport(QObject *watched) const;
+
+    /// Handles a QEvent::MouseMove / QEvent::Leave on the power chart
+    /// viewport: draws a vertical dotted crosshair at the hovered timestamp
+    /// and shows a persistent tooltip box with the data at that timestamp.
+    /// Unlike QToolTip, the tooltip does not auto-hide on a timer — it is
+    /// only hidden when the mouse leaves the chart view.
+    void handleHoverEvent(QEvent *event);
+
 private:
     ChartWidget &m_owner;
 
@@ -78,6 +108,38 @@ private:
 
     // Humidity chart
     QXYSeries *m_humiditySeries = nullptr;
+
+    // Hover crosshair / persistent tooltip (Power tab only)
+    QPointer<QChartView>    m_powerChartView  = nullptr;
+    QGraphicsLineItem       *m_hoverLine      = nullptr;  ///< vertical dotted line, child of m_powerChart
+    QGraphicsRectItem       *m_hoverInfoBg    = nullptr;  ///< tooltip background, added to the view's scene
+    QGraphicsSimpleTextItem *m_hoverInfoText  = nullptr;  ///< tooltip text, child of m_hoverInfoBg
+    // Series actually attached to m_powerAxisX/m_powerAxisY via attachAxis(),
+    // used for QChart::mapToValue()/mapToPosition() in handleHoverEvent().
+    // NOTE: m_powerSeries / m_powerStackedUpper entries are the *boundary*
+    // QLineSeries owned by a QAreaSeries — only the QAreaSeries itself (or
+    // m_powerNetSeries) is ever attached to the axes, so mapping calls MUST
+    // use this pointer, not m_powerSeries/m_powerStackedUpper directly.
+    QAbstractSeries *m_hoverMappingSeries = nullptr;
+
+    /// Returns the sample timestamp (ms since epoch) nearest to \a targetMs,
+    /// looked up from the cached raw history (m_owner.m_device / m_memberDevices)
+    /// rather than the (possibly downsampled) display series, so the tooltip
+    /// always reflects real polled data.
+    qint64 findNearestTimestamp(qint64 targetMs) const;
+
+    /// Builds the multi-line tooltip text for the sample nearest \a tsMs:
+    /// one line per group member (or a single "Power" line for a single
+    /// device), plus a "Net" line when the net overlay series exists.
+    QString formatTooltip(qint64 tsMs) const;
+
+    /// Hides the crosshair line and tooltip box.
+    void hideHoverCrosshair();
+
+    /// Positions/resizes the tooltip box near the given viewport-local mouse
+    /// position, flipping to the opposite side when it would overflow the
+    /// viewport bounds.
+    void positionHoverInfoBox(const QPoint &viewportPos);
 
     friend class ChartWidget;
 };

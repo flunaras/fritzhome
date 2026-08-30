@@ -282,9 +282,12 @@ QWidget *makeChartTab(QChart *chart, const QString &currentValueText,
                       QPointer<QLabel> *outLabel,
                       QScrollBar *scrollBar,
                       QCheckBox *lockCheckBox,
-                      QComboBox *windowCombo)
+                      QComboBox *windowCombo,
+                      QPointer<QChartView> *outView)
 {
     QChartView *view = makeChartView(chart);
+    if (outView)
+        *outView = view;
 
     QLabel *valueLabel = new QLabel(currentValueText);
     valueLabel->setObjectName("currentValueLabel");

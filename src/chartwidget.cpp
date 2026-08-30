@@ -654,6 +654,16 @@ void ChartWidget::applyTimeWindow()
 
 bool ChartWidget::eventFilter(QObject *watched, QEvent *event)
 {
+    // Power chart hover crosshair + persistent tooltip. The event filter is
+    // installed on the power QChartView's viewport by
+    // PowerChartBuilder::installHoverGraphics(); forward mouse-move/leave
+    // events there so it can draw the vertical dotted line and update the
+    // tooltip box (see PowerChartBuilder::handleHoverEvent()).
+    if (m_powerBuilder.ownsViewport(watched)
+        && (event->type() == QEvent::MouseMove || event->type() == QEvent::Leave)) {
+        m_powerBuilder.handleHoverEvent(event);
+    }
+
     if (event->type() == QEvent::ToolTip) {
         QHelpEvent *he = static_cast<QHelpEvent *>(event);
         if (!m_historyBuilder.m_energyBarTooltip.isEmpty())
