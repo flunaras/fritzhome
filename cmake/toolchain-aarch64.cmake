@@ -86,6 +86,9 @@ set(GLESv2_LIBRARY     "${CMAKE_SYSROOT}/usr/lib64/libGLESv2.so"  CACHE FILEPATH
 # pure collection of cmake function definitions with no dependencies) so that
 # any helper function the host's CoreTools config needs is already defined when
 # find_package(Qt6CoreTools) runs.
+if(EXISTS "/usr/lib64/cmake/Qt6/QtPublicCMakeIncludeGuardHelpers.cmake")
+    include("/usr/lib64/cmake/Qt6/QtPublicCMakeIncludeGuardHelpers.cmake")
+endif()
 if(EXISTS "/usr/lib64/cmake/Qt6/QtPublicCMakeHelpers.cmake")
     include("/usr/lib64/cmake/Qt6/QtPublicCMakeHelpers.cmake")
 endif()
