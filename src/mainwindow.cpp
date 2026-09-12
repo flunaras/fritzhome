@@ -105,9 +105,8 @@ MainWindow::MainWindow(QWidget *parent)
 
     // ── Dock widgets ──────────────────────────────────────────────────────────
     // Create all three docks first (each addDockWidget call places them), then
-    // use splitDockWidget() to establish the default layout:
-    //   [ Devices | Device Control ]
-    //             [ Device Charts  ]
+    // use splitDockWidget()/tabifyDockWidget() to establish the default layout:
+    //   [ Devices | Device Control ]  (tabbed with Device Charts)
     // This only applies on first launch; saveState()/restoreState() takes over
     // for subsequent sessions.
     setupDeviceTree();    // m_deviceDock  — placed in LeftDockWidgetArea
@@ -116,12 +115,15 @@ MainWindow::MainWindow(QWidget *parent)
 
     // Default layout (first launch only — saveState/restoreState takes over for
     // subsequent sessions):
-    //   [ Devices | Device Control ]
-    //             [ Device Charts  ]
-    // The device dock occupies the left column; the control dock and chart dock
-    // are stacked vertically in the right column, matching the reference layout.
+    //   [ Devices | Device Control / Device Charts (tabbed) ]
+    // The control and chart docks are tabified together in the same dock area
+    // rather than stacked, so a "Device Control" tab is always reachable via a
+    // click even if the chart dock takes up the full area — this guarantees the
+    // switch/thermostat/etc. control widgets remain visible and easy to find,
+    // instead of only being reachable by resizing or toggling a separate dock.
     splitDockWidget(m_deviceDock,  m_controlDock, Qt::Horizontal);
-    splitDockWidget(m_controlDock, m_chartDock,   Qt::Vertical);
+    tabifyDockWidget(m_controlDock, m_chartDock);
+    m_controlDock->raise();  // make "Device Control" the active tab by default
 
     setupStatusBar();
     setupActions();
