@@ -55,7 +55,7 @@ void TemperatureChartBuilder::buildTemperatureChart(const FritzDevice &dev)
     chart->addSeries(series);
 
     QDateTimeAxis *axisX = new QDateTimeAxis();
-    configureTimeAxis(axisX, i18n("Time"));
+    configureTimeAxis(axisX, i18n("Time"), chart);
     chart->addAxis(axisX, Qt::AlignBottom);
     series->attachAxis(axisX);
 
@@ -145,7 +145,7 @@ void TemperatureChartBuilder::buildGroupTemperatureChart(const FritzDeviceList &
     QChart *chart = makeBaseChart(i18n("Temperature History"));
 
     QDateTimeAxis *axisX = new QDateTimeAxis();
-    configureTimeAxis(axisX, i18n("Time"));
+    configureTimeAxis(axisX, i18n("Time"), chart);
     chart->addAxis(axisX, Qt::AlignBottom);
 
     QValueAxis *axisY = new QValueAxis();
@@ -333,6 +333,12 @@ void TemperatureChartBuilder::reset()
     m_tempAxisY  = nullptr;
     m_tempSeries = nullptr;
     m_tempValueLabel = nullptr;
+    // Owned by m_tempChart/m_groupTempChart (now being torn down) — see the
+    // comment above TimeAxisOverlay in chartutils.h.
+    m_tempAxisOverlay.ticks.clear();
+    m_tempAxisOverlay.labels.clear();
+    m_groupTempAxisOverlay.ticks.clear();
+    m_groupTempAxisOverlay.labels.clear();
 
     m_groupTempChart = nullptr;
     m_groupTempAxisX = nullptr;

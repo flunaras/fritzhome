@@ -16,6 +16,10 @@
 #include <QCheckBox>
 #include <QIcon>
 #include <QPalette>
+#include <QGraphicsLineItem>
+#include <QGraphicsSimpleTextItem>
+#include <QFont>
+#include <QFontMetrics>
 
 #include <cmath>
 #include <algorithm>
@@ -207,10 +211,141 @@ QChart *makeBaseChart(const QString &title)
     return chart;
 }
 
-void configureTimeAxis(QDateTimeAxis *axis, const QString &label)
+void configureTimeAxis(QDateTimeAxis *axis, const QString &label, QChart *chart)
 {
     axis->setFormat("hh:mm");
     axis->setTitleText(label);
+    // Native labels/gridlines/line are replaced by updateTimeAxisOverlay(),
+    // which draws tick marks + labels at exact, round clock timestamps
+    // instead of QDateTimeAxis's native evenly-spaced (non-round) ticks —
+    // see the comment above updateTimeAxisOverlay() in chartutils.h.
+    axis->setLabelsVisible(false);
+    axis->setGridLineVisible(false);
+    axis->setMinorGridLineVisible(false);
+    axis->setLineVisible(false);
+
+    // Hiding the native labels/line lets Qt Charts shrink the bottom margin
+    // it would otherwise reserve for them, which would clip the custom
+    // overlay's tick marks + labels drawn just below the plot area. Reserve
+    // enough room for one line of label text plus the tick protrusion.
+    if (chart) {
+        const QFontMetrics fm(axis->labelsFont());
+        const int neededBottom = fm.height() + 12;
+        QMargins margins = chart->margins();
+        margins.setBottom(qMax(margins.bottom(), neededBottom));
+        chart->setMargins(margins);
+    }
+}
+
+// ── Exact time-axis tick overlay ────────────────────────────────────────────
+
+qint64 computeNiceTimeStep(qint64 rangeMs, int maxTicks)
+{
+    static const qint64 kCandidates[] = {
+        10LL   * 1000,             // 10 s
+        15LL   * 1000,             // 15 s
+        30LL   * 1000,             // 30 s
+        1LL    * 60 * 1000,        // 1 min
+        2LL    * 60 * 1000,        // 2 min
+        3LL    * 60 * 1000,        // 3 min
+        5LL    * 60 * 1000,        // 5 min
+        10LL   * 60 * 1000,        // 10 min
+        15LL   * 60 * 1000,        // 15 min
+        20LL   * 60 * 1000,        // 20 min
+        30LL   * 60 * 1000,        // 30 min
+        1LL    * 3600 * 1000,      // 1 h
+        2LL    * 3600 * 1000,      // 2 h
+        3LL    * 3600 * 1000,      // 3 h
+        4LL    * 3600 * 1000,      // 4 h
+        6LL    * 3600 * 1000,      // 6 h
+        12LL   * 3600 * 1000,      // 12 h
+        24LL   * 3600 * 1000,      // 24 h
+    };
+    const int n = static_cast<int>(sizeof(kCandidates) / sizeof(kCandidates[0]));
+    if (rangeMs <= 0 || maxTicks < 1)
+        return kCandidates[0];
+    for (int i = 0; i < n; ++i) {
+        if (rangeMs / kCandidates[i] <= maxTicks)
+            return kCandidates[i];
+    }
+    return kCandidates[n - 1];
+}
+
+void updateTimeAxisOverlay(TimeAxisOverlay &overlay, QChart *chart,
+                           QDateTimeAxis *axisX, QAbstractSeries *mappingSeries)
+{
+    // Rebuilt from scratch each call — the number of ticks in the visible
+    // window varies between redraws (window duration, resize, scroll), so
+    // it's simplest to discard the old items and recreate them rather than
+    // reuse/reposition a variable-length list.
+    qDeleteAll(overlay.ticks);
+    overlay.ticks.clear();
+    qDeleteAll(overlay.labels);
+    overlay.labels.clear();
+
+    if (!chart || !axisX || !mappingSeries)
+        return;
+
+    const QRectF plotArea = chart->plotArea();
+    if (plotArea.isEmpty())
+        return;
+
+    const qint64 minMs = axisX->min().toMSecsSinceEpoch();
+    const qint64 maxMs = axisX->max().toMSecsSinceEpoch();
+    if (maxMs <= minMs)
+        return;
+
+    // Target ~1 tick per 45px so labels stay legible without crowding while
+    // showing noticeably more ticks than before.
+    const int kMinPixelsPerTick = 45;
+    const int maxTicks = qMax(2, static_cast<int>(plotArea.width()) / kMinPixelsPerTick);
+    const qint64 step  = computeNiceTimeStep(maxMs - minMs, maxTicks);
+    const qint64 firstTickMs = ((minMs + step - 1) / step) * step;  // ceil to step multiple
+
+    // Sub-minute steps need seconds in the label, or every tick within the
+    // same minute would render an identical "hh:mm" text — very confusing
+    // since it looks like duplicated/misaligned labels rather than distinct
+    // ticks a few seconds apart.
+    const QString labelFormat = (step < 60 * 1000) ? QStringLiteral("hh:mm:ss")
+                                                    : QStringLiteral("hh:mm");
+
+    constexpr qreal kTickProtrusion = 6.0;  // small tick mark below the plot area
+
+    QPen pen(QColor(0xBF, 0xBF, 0xBF));
+    pen.setWidth(1);
+    pen.setCosmetic(true);
+
+    const QFont labelFont   = axisX->labelsFont();
+    const QColor labelColor = axisX->labelsColor();
+
+    for (qint64 ms = firstTickMs; ms <= maxMs; ms += step) {
+        const qreal x = chart->mapToPosition(QPointF(static_cast<double>(ms), 0.0),
+                                              mappingSeries).x();
+
+        // Full-height vertical gridline (top of plot area down through the
+        // small protrusion below it) — Qt Charts always paints series *above*
+        // its own native gridlines with no public API to reorder that, so the
+        // native gridline was disabled (configureTimeAxis()) and this is
+        // drawn instead. Given a low (below zero) Z-value so it renders
+        // *behind* every data series — matching the native Y-axis gridlines'
+        // own always-behind-series stacking — rather than on top, which
+        // would otherwise obscure line series (e.g. the group power chart's
+        // net/effective line) drawn across it.
+        auto *line = new QGraphicsLineItem(x, plotArea.top(), x,
+                                            plotArea.bottom() + kTickProtrusion, chart);
+        line->setPen(pen);
+        line->setZValue(-1);  // behind every data series, like the native Y gridlines
+        overlay.ticks.append(line);
+
+        auto *label = new QGraphicsSimpleTextItem(chart);
+        label->setText(QDateTime::fromMSecsSinceEpoch(ms).toString(labelFormat));
+        label->setFont(labelFont);
+        label->setBrush(labelColor);
+        label->setZValue(10);
+        const QRectF textRect = label->boundingRect();
+        label->setPos(x - textRect.width() / 2.0, plotArea.bottom() + kTickProtrusion + 2.0);
+        overlay.labels.append(label);
+    }
 }
 
 QWidget *wrapInFramedContainer(QWidget *innerWidget)

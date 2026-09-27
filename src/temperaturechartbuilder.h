@@ -65,6 +65,12 @@ private:
     QXYSeries     *m_tempSeries = nullptr;
     QPointer<QLabel> m_tempValueLabel = nullptr;
 
+    // Exact-time X-axis tick overlays (see chartutils.h updateTimeAxisOverlay).
+    // Rebuilt by ChartWidget::applyTimeWindow() right after the respective
+    // axis's range is set, and on chart view resize.
+    TimeAxisOverlay m_tempAxisOverlay;
+    TimeAxisOverlay m_groupTempAxisOverlay;
+
     // Group temperature chart
     QChart                 *m_groupTempChart  = nullptr;
     QDateTimeAxis          *m_groupTempAxisX = nullptr;

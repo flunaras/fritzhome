@@ -631,6 +631,8 @@ void ChartWidget::applyTimeWindow()
             ? static_cast<int>(m_tempBuilder.m_tempChart->plotArea().width()) : 0;
         applyTimeAxisTicks(m_tempBuilder.m_tempAxisX, winMs, pw);
         m_tempBuilder.rescaleYTemp(minMs, maxMs);
+        updateTimeAxisOverlay(m_tempBuilder.m_tempAxisOverlay, m_tempBuilder.m_tempChart,
+                              m_tempBuilder.m_tempAxisX, m_tempBuilder.m_tempSeries);
     }
     if (m_tempBuilder.m_groupTempAxisX) {
         m_tempBuilder.m_groupTempAxisX->setRange(minDt, maxDt);
@@ -638,6 +640,10 @@ void ChartWidget::applyTimeWindow()
             ? static_cast<int>(m_tempBuilder.m_groupTempChart->plotArea().width()) : 0;
         applyTimeAxisTicks(m_tempBuilder.m_groupTempAxisX, winMs, pw);
         m_tempBuilder.rescaleYGroupTemp(minMs, maxMs);
+        QAbstractSeries *mapSeries = m_tempBuilder.m_groupTempSeries.isEmpty()
+            ? nullptr : m_tempBuilder.m_groupTempSeries.first();
+        updateTimeAxisOverlay(m_tempBuilder.m_groupTempAxisOverlay, m_tempBuilder.m_groupTempChart,
+                              m_tempBuilder.m_groupTempAxisX, mapSeries);
     }
     if (m_powerBuilder.m_powerAxisX) {
         m_powerBuilder.m_powerAxisX->setRange(minDt, maxDt);
@@ -645,6 +651,8 @@ void ChartWidget::applyTimeWindow()
             ? static_cast<int>(m_powerBuilder.m_powerChart->plotArea().width()) : 0;
         applyTimeAxisTicks(m_powerBuilder.m_powerAxisX, winMs, pw);
         m_powerBuilder.rescaleYPower(minMs, maxMs);
+        updateTimeAxisOverlay(m_powerBuilder.m_powerAxisOverlay, m_powerBuilder.m_powerChart,
+                              m_powerBuilder.m_powerAxisX, m_powerBuilder.m_hoverMappingSeries);
     }
 }
 

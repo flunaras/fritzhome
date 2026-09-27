@@ -95,6 +95,11 @@ private:
     QXYSeries     *m_powerLowerSeries = nullptr;  ///< lower zero baseline (single-device mode)
     QPointer<QLabel> m_powerValueLabel = nullptr;
 
+    // Exact-time X-axis tick overlay (see chartutils.h updateTimeAxisOverlay).
+    // Rebuilt by ChartWidget::applyTimeWindow() right after m_powerAxisX's
+    // range is set, and on chart view resize.
+    TimeAxisOverlay m_powerAxisOverlay;
+
     // Stacked power chart (group mode)
     QList<QXYSeries *> m_powerStackedUpper;
     QList<QXYSeries *> m_powerStackedLower;

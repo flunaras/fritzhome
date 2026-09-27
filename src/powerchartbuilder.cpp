@@ -85,7 +85,7 @@ void PowerChartBuilder::buildPowerChart(const FritzDevice &dev,
 
     QChart *chart = makeBaseChart(i18n("Power Consumption"));
     QDateTimeAxis *axisX = new QDateTimeAxis();
-    configureTimeAxis(axisX, i18n("Time"));
+    configureTimeAxis(axisX, i18n("Time"), chart);
     chart->addAxis(axisX, Qt::AlignBottom);
     QValueAxis *axisY = new QValueAxis();
     axisY->setTitleText(i18n("Watts"));
@@ -352,8 +352,13 @@ void PowerChartBuilder::buildHumidityChart(const FritzDevice &dev)
     QChart *chart = makeBaseChart(i18n("Humidity History"));
     chart->addSeries(series);
 
+    // Humidity has no time-window combo/scrollbar (static full-history plot),
+    // so it keeps the plain native QDateTimeAxis labels instead of the
+    // exact-time overlay used by the Power/Temperature tabs (which is only
+    // maintained dynamically via ChartWidget::applyTimeWindow()).
     QDateTimeAxis *axisX = new QDateTimeAxis();
-    configureTimeAxis(axisX, i18n("Time"));
+    axisX->setFormat("hh:mm");
+    axisX->setTitleText(i18n("Time"));
     chart->addAxis(axisX, Qt::AlignBottom);
     series->attachAxis(axisX);
 
@@ -626,6 +631,11 @@ void PowerChartBuilder::reset()
     m_powerStackedUpper.clear();
     m_powerStackedLower.clear();
     m_powerNetSeries   = nullptr;
+
+    // Owned by m_powerChart (now being torn down) — see the comment above
+    // TimeAxisOverlay in chartutils.h.
+    m_powerAxisOverlay.ticks.clear();
+    m_powerAxisOverlay.labels.clear();
 
     m_humiditySeries = nullptr;
 

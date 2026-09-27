@@ -30,6 +30,13 @@ QT_FORWARD_DECLARE_CLASS(QLabel)
 QT_FORWARD_DECLARE_CLASS(QCheckBox)
 QT_FORWARD_DECLARE_CLASS(QComboBox)
 QT_FORWARD_DECLARE_CLASS(QScrollBar)
+QT_FORWARD_DECLARE_CLASS(QGraphicsLineItem)
+QT_FORWARD_DECLARE_CLASS(QGraphicsSimpleTextItem)
+// QAbstractSeries is already made visible (via QT_CHARTS_USE_NAMESPACE and the
+// QXYSeries include above) — do NOT forward declare it again here: under Qt5
+// it lives in the QtCharts:: namespace, and a bare
+// QT_FORWARD_DECLARE_CLASS(QAbstractSeries) would create a clashing
+// *global*-namespace declaration (see powerchartbuilder.h for the same issue).
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -84,6 +91,47 @@ qint64 niceTimeTickIntervalMs(qint64 windowMs, int targetTicks = 10);
 /// tick density to the available space; 0 falls back to ~10 ticks.
 void applyTimeAxisTicks(QDateTimeAxis *axis, qint64 windowMs, int pixelWidth = 0);
 
+// ── Exact time-axis tick overlay ─────────────────────────────────────────────
+//
+// QDateTimeAxis's native ticks are always evenly spaced between min()/max()
+// into exactly tickCount() intervals, with no "round clock time" snapping.
+// For most window durations that doesn't land on whole seconds/minutes/hours
+// — e.g. a 15-minute window divided into 10 gaps yields 1.5-minute ticks, so
+// consecutive native labels round inconsistently (+1 min, then +2 min, ...).
+// computeNiceTimeStep() + updateTimeAxisOverlay() replace the native labels
+// with custom-drawn tick marks + "hh:mm"/"hh:mm:ss" labels positioned at
+// exact, round timestamps, so the displayed time always matches the
+// underlying data and shifts smoothly (moves with the data) as the visible
+// window scrolls or live-tracks new samples.
+
+/// Returns the smallest candidate step (whole seconds/minutes/hours, from an
+/// internal fixed table) that keeps the number of ticks across \a rangeMs at
+/// or below \a maxTicks — i.e. the highest-resolution round step that still
+/// respects the tick budget.
+qint64 computeNiceTimeStep(qint64 rangeMs, int maxTicks);
+
+/// Holds the QGraphicsItems used to draw the custom time-axis tick overlay
+/// for one chart's X axis. Items are parented directly to the QChart, so they
+/// are automatically destroyed when the chart/tab is torn down — callers only
+/// need to clear() these lists (not delete the items) when the owning chart
+/// is discarded (see e.g. PowerChartBuilder::reset()).
+struct TimeAxisOverlay {
+    QList<QGraphicsLineItem *> ticks;
+    QList<QGraphicsSimpleTextItem *> labels;
+};
+
+/// (Re)draws the exact-time tick marks + labels for \a axisX on \a chart,
+/// replacing the axis's native (evenly-spaced, non-round) labels — callers
+/// must hide the native labels once via configureTimeAxis(). \a mappingSeries
+/// must be a series currently attached to \a axisX (used for
+/// QChart::mapToPosition() to convert timestamps to pixel X coordinates).
+/// Must be (re)called after \a axisX's range has been set — e.g. from
+/// ChartWidget::applyTimeWindow() right after axis->setRange(...) — and again
+/// on chart/view resize, since the plot area (and therefore every tick's
+/// pixel position) changes independently of the data.
+void updateTimeAxisOverlay(TimeAxisOverlay &overlay, QChart *chart,
+                           QDateTimeAxis *axisX, QAbstractSeries *mappingSeries);
+
 // ── Chart factory helpers ───────────────────────────────────────────────────
 
 /// Create a QChartView with antialiasing and minimum height.
@@ -92,8 +140,12 @@ QChartView *makeChartView(QChart *chart);
 /// Create a styled QChart with hidden legend and no animation.
 QChart *makeBaseChart(const QString &title);
 
-/// Configure a QDateTimeAxis with "hh:mm" format and a title.
-void configureTimeAxis(QDateTimeAxis *axis, const QString &label);
+/// Configure a QDateTimeAxis with "hh:mm" format and a title, hides its
+/// native labels/gridlines/line (replaced by the custom overlay drawn by
+/// updateTimeAxisOverlay()), and reserves extra bottom margin on \a chart so
+/// the overlay's tick marks + labels — drawn just below the plot area — are
+/// not clipped by the chart's own bounding rect.
+void configureTimeAxis(QDateTimeAxis *axis, const QString &label, QChart *chart);
 
 /// Wrap a widget with the grey frame border effect (matching chart tabs).
 QWidget *wrapInFramedContainer(QWidget *innerWidget);
