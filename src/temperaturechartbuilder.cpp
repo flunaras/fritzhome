@@ -13,9 +13,17 @@
 #include <QDateTime>
 #include <QSettings>
 #include <QPen>
+#include <QEvent>
+#include <QMouseEvent>
+#include <QGraphicsLineItem>
+#include <QGraphicsRectItem>
+#include <QGraphicsSimpleTextItem>
 #include <limits>
+#include <algorithm>
 
 #include <QtCharts/QChart>
+#include <QtCharts/QChartView>
+#include <QtCharts/QAbstractSeries>
 #include <QtCharts/QLineSeries>
 #include <QtCharts/QDateTimeAxis>
 #include <QtCharts/QValueAxis>
@@ -108,6 +116,9 @@ void TemperatureChartBuilder::buildTemperatureChart(const FritzDevice &dev)
     m_tempAxisX  = axisX;
     m_tempAxisY  = axisY;
     m_tempSeries = series;
+    m_hoverMappingSeries = series;
+    m_hoverChart = chart;
+    m_groupTempMembers.clear();
 
     // Create the "Lock Y scale" checkbox overlaid inside the chart area (bottom-left).
     // Created here (not in the constructor) so a fresh instance exists after every device switch.
@@ -126,7 +137,10 @@ void TemperatureChartBuilder::buildTemperatureChart(const FritzDevice &dev)
     tmpWindowCombo->setCurrentIndex(qBound(0, m_owner.m_windowComboIndex, 8));
     QObject::connect(tmpWindowCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), &m_owner,
             [this](int idx){ m_owner.m_windowComboIndex = idx; m_owner.onWindowComboChanged(idx); m_owner.saveChartState(); });
-    m_owner.m_tabs->addTab(makeChartTab(chart, currentText, &m_tempValueLabel, m_owner.m_scrollBar, m_tempLockCheckBox, tmpWindowCombo), i18n("Temperature"));
+    QPointer<QChartView> viewPtr;
+    QWidget *tab = makeChartTab(chart, currentText, &m_tempValueLabel, m_owner.m_scrollBar, m_tempLockCheckBox, tmpWindowCombo, &viewPtr);
+    installHoverGraphics(viewPtr);
+    m_owner.m_tabs->addTab(tab, i18n("Temperature"));
 }
 
 // ── Group temperature chart ─────────────────────────────────────────────────
@@ -192,7 +206,11 @@ void TemperatureChartBuilder::buildGroupTemperatureChart(const FritzDeviceList &
         series->attachAxis(axisY);
 
         m_groupTempSeries.append(series);
+        if (i == 0)
+            m_hoverMappingSeries = series;
     }
+
+    m_groupTempMembers = tempMembers;
 
     if (anyData) {
         applyAxisRange(axisY, roundAxisRange(minAll, maxAll));
@@ -205,6 +223,7 @@ void TemperatureChartBuilder::buildGroupTemperatureChart(const FritzDeviceList &
     m_groupTempChart = chart;
     m_groupTempAxisX = axisX;
     m_groupTempAxisY = axisY;
+    m_hoverChart = chart;
 
     // Create the "Lock Y scale" checkbox overlaid inside the chart area (bottom-left).
     // Shares the same m_tempScaleLocked / m_lockedTempMin / m_lockedTempMax state as
@@ -220,7 +239,10 @@ void TemperatureChartBuilder::buildGroupTemperatureChart(const FritzDeviceList &
     tmpWindowCombo->setCurrentIndex(qBound(0, m_owner.m_windowComboIndex, 8));
     QObject::connect(tmpWindowCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), &m_owner,
             [this](int idx){ m_owner.m_windowComboIndex = idx; m_owner.onWindowComboChanged(idx); m_owner.saveChartState(); });
-    m_owner.m_tabs->addTab(makeChartTab(chart, QString(), nullptr, m_owner.m_scrollBar, m_tempLockCheckBox, tmpWindowCombo), i18n("Temperature"));
+    QPointer<QChartView> viewPtr;
+    QWidget *tab = makeChartTab(chart, QString(), nullptr, m_owner.m_scrollBar, m_tempLockCheckBox, tmpWindowCombo, &viewPtr);
+    installHoverGraphics(viewPtr);
+    m_owner.m_tabs->addTab(tab, i18n("Temperature"));
 }
 
 // ── Rolling update ──────────────────────────────────────────────────────────
@@ -344,6 +366,17 @@ void TemperatureChartBuilder::reset()
     m_groupTempAxisX = nullptr;
     m_groupTempAxisY = nullptr;
     m_groupTempSeries.clear();
+    m_groupTempMembers.clear();
+
+    // Hover graphics are owned by the QChartView/scene being torn down right
+    // after reset() runs (see ChartWidget::updateDevice), so it is safe to
+    // simply drop our raw pointers here without deleting anything ourselves.
+    m_tempChartView      = nullptr;
+    m_hoverLine          = nullptr;
+    m_hoverInfoBg        = nullptr;
+    m_hoverInfoText      = nullptr;
+    m_hoverMappingSeries = nullptr;
+    m_hoverChart         = nullptr;
 }
 
 void TemperatureChartBuilder::nullifyWidgetPointers(QWidget *w)
@@ -377,4 +410,188 @@ void TemperatureChartBuilder::loadState()
     m_tempScaleLocked = s.value(QStringLiteral("chart/tempScaleLocked"), false).toBool();
     m_lockedTempMin   = s.value(QStringLiteral("chart/lockedTempMin"),   0.0).toDouble();
     m_lockedTempMax   = s.value(QStringLiteral("chart/lockedTempMax"),   30.0).toDouble();
+}
+
+// ── Hover crosshair / persistent tooltip ────────────────────────────────────
+
+void TemperatureChartBuilder::installHoverGraphics(QChartView *view)
+{
+    if (!view || !m_hoverChart)
+        return;
+
+    m_tempChartView = view;
+    view->setMouseTracking(true);
+    view->viewport()->setMouseTracking(true);
+    // Forwarded via ChartWidget::eventFilter — see ownsViewport()/handleHoverEvent().
+    view->viewport()->installEventFilter(&m_owner);
+
+    // Vertical dotted crosshair, parented to the active chart so its
+    // coordinate system matches plotArea() / mapToValue() / mapToPosition()
+    // directly.
+    m_hoverLine = new QGraphicsLineItem(m_hoverChart);
+    QPen hoverPen(QColor(80, 80, 80));
+    hoverPen.setStyle(Qt::DotLine);
+    hoverPen.setWidth(1);
+    m_hoverLine->setPen(hoverPen);
+    m_hoverLine->setZValue(100);
+    m_hoverLine->hide();
+
+    // Persistent tooltip box — added directly to the scene (view/scene
+    // coordinates) so it can be freely positioned near the cursor. Unlike
+    // QToolTip it has no auto-hide timer; it is only hidden explicitly in
+    // hideHoverCrosshair().
+    m_hoverInfoBg = new QGraphicsRectItem();
+    m_hoverInfoBg->setBrush(QColor(255, 255, 225, 235));
+    m_hoverInfoBg->setPen(QPen(QColor(120, 120, 120)));
+    m_hoverInfoBg->setZValue(101);
+    m_hoverInfoBg->hide();
+    view->scene()->addItem(m_hoverInfoBg);
+
+    m_hoverInfoText = new QGraphicsSimpleTextItem(m_hoverInfoBg);
+    m_hoverInfoText->setPos(6, 4);
+    m_hoverInfoText->setBrush(QColor(20, 20, 20));
+}
+
+bool TemperatureChartBuilder::ownsViewport(QObject *watched) const
+{
+    return m_tempChartView && watched == m_tempChartView->viewport();
+}
+
+void TemperatureChartBuilder::handleHoverEvent(QEvent *event)
+{
+    if (!m_hoverChart || !m_tempChartView || !m_hoverLine)
+        return;
+
+    switch (event->type()) {
+    case QEvent::MouseMove: {
+        auto *mouseEvent = static_cast<QMouseEvent *>(event);
+        const QPointF posInChart =
+            m_hoverChart->mapFromScene(m_tempChartView->mapToScene(mouseEvent->pos()));
+        const QRectF plotArea = m_hoverChart->plotArea();
+
+        QAbstractSeries *refSeries = m_hoverMappingSeries;
+
+        if (!refSeries || !plotArea.contains(posInChart)) {
+            hideHoverCrosshair();
+            break;
+        }
+
+        const double targetXMs = m_hoverChart->mapToValue(posInChart, refSeries).x();
+        const qint64 nearestTs = findNearestTimestamp(static_cast<qint64>(targetXMs));
+
+        // Snap the crosshair to the sample's exact timestamp (not the raw
+        // mouse X) so it lines up with the actual data point.
+        const QPointF snappedPos = m_hoverChart->mapToPosition(
+            QPointF(static_cast<double>(nearestTs), 0.0), refSeries);
+        m_hoverLine->setLine(snappedPos.x(), plotArea.top(),
+                             snappedPos.x(), plotArea.bottom());
+        m_hoverLine->show();
+
+        m_hoverInfoText->setText(formatTooltip(nearestTs));
+        positionHoverInfoBox(mouseEvent->pos());
+        m_hoverInfoBg->show();
+        break;
+    }
+    case QEvent::Leave:
+        hideHoverCrosshair();
+        break;
+    default:
+        break;
+    }
+}
+
+qint64 TemperatureChartBuilder::findNearestTimestamp(qint64 targetMs) const
+{
+    // Use the raw (un-downsampled) history of a single reference device so
+    // the crosshair always snaps to a real polled sample, regardless of how
+    // aggressively the display series was downsampled.
+    const QList<QPair<QDateTime, double>> *ref = !m_groupTempMembers.isEmpty()
+        ? &m_groupTempMembers.first().temperatureHistory
+        : &m_owner.m_device.temperatureHistory;
+
+    if (ref->isEmpty())
+        return targetMs;
+
+    auto it = std::lower_bound(ref->begin(), ref->end(), targetMs,
+                               [](const QPair<QDateTime, double> &p, qint64 value) {
+                                   return p.first.toMSecsSinceEpoch() < value;
+                               });
+
+    if (it == ref->begin())
+        return it->first.toMSecsSinceEpoch();
+    if (it == ref->end())
+        return (ref->end() - 1)->first.toMSecsSinceEpoch();
+
+    const qint64 afterTs  = it->first.toMSecsSinceEpoch();
+    const qint64 beforeTs = (it - 1)->first.toMSecsSinceEpoch();
+    return (targetMs - beforeTs <= afterTs - targetMs) ? beforeTs : afterTs;
+}
+
+QString TemperatureChartBuilder::formatTooltip(qint64 tsMs) const
+{
+    // Nearest-value lookup for a single device's history near tsMs — mirrors
+    // findNearestTimestamp()'s binary search but returns the associated
+    // temperature value instead of the timestamp.
+    auto valueNear = [](const QList<QPair<QDateTime, double>> &history, qint64 ts) -> double {
+        if (history.isEmpty())
+            return 0.0;
+        auto it = std::lower_bound(history.begin(), history.end(), ts,
+                                   [](const QPair<QDateTime, double> &p, qint64 value) {
+                                       return p.first.toMSecsSinceEpoch() < value;
+                                   });
+        if (it == history.begin())
+            return it->second;
+        if (it == history.end())
+            return (history.end() - 1)->second;
+        const qint64 afterTs  = it->first.toMSecsSinceEpoch();
+        const qint64 beforeTs = (it - 1)->first.toMSecsSinceEpoch();
+        return (ts - beforeTs <= afterTs - ts) ? (it - 1)->second : it->second;
+    };
+
+    const QDateTime dt = QDateTime::fromMSecsSinceEpoch(tsMs);
+    QString text = dt.toString(QStringLiteral("hh:mm:ss"));
+
+    if (!m_groupTempMembers.isEmpty()) {
+        for (const FritzDevice &member : m_groupTempMembers) {
+            const double value = valueNear(member.temperatureHistory, tsMs);
+            text += QStringLiteral("\n%1: %2 \u00B0C").arg(member.name).arg(value, 0, 'f', 1);
+        }
+    } else {
+        const double value = valueNear(m_owner.m_device.temperatureHistory, tsMs);
+        text += QStringLiteral("\n%1: %2 \u00B0C").arg(i18n("Temperature")).arg(value, 0, 'f', 1);
+    }
+
+    return text;
+}
+
+void TemperatureChartBuilder::hideHoverCrosshair()
+{
+    if (m_hoverLine)
+        m_hoverLine->hide();
+    if (m_hoverInfoBg)
+        m_hoverInfoBg->hide();
+}
+
+void TemperatureChartBuilder::positionHoverInfoBox(const QPoint &viewportPos)
+{
+    if (!m_hoverInfoText || !m_hoverInfoBg || !m_tempChartView)
+        return;
+
+    const QRectF textRect = m_hoverInfoText->boundingRect();
+    const QRectF bgRect(0, 0, textRect.width() + 12, textRect.height() + 8);
+    m_hoverInfoBg->setRect(bgRect);
+
+    // Anchor near the cursor, offset down-right by default, flipping to the
+    // opposite side when it would overflow the viewport so the box always
+    // stays fully visible.
+    const QSize viewSize = m_tempChartView->viewport()->size();
+    qreal x = viewportPos.x() + 16;
+    qreal y = viewportPos.y() + 16;
+    if (x + bgRect.width() > viewSize.width())
+        x = viewportPos.x() - bgRect.width() - 16;
+    if (y + bgRect.height() > viewSize.height())
+        y = viewportPos.y() - bgRect.height() - 16;
+
+    const QPointF scenePos = m_tempChartView->mapToScene(QPoint(qRound(x), qRound(y)));
+    m_hoverInfoBg->setPos(scenePos);
 }

@@ -672,6 +672,13 @@ bool ChartWidget::eventFilter(QObject *watched, QEvent *event)
         m_powerBuilder.handleHoverEvent(event);
     }
 
+    // Temperature chart hover crosshair + persistent tooltip — same pattern
+    // as the power chart above (see TemperatureChartBuilder::installHoverGraphics()).
+    if (m_tempBuilder.ownsViewport(watched)
+        && (event->type() == QEvent::MouseMove || event->type() == QEvent::Leave)) {
+        m_tempBuilder.handleHoverEvent(event);
+    }
+
     if (event->type() == QEvent::ToolTip) {
         QHelpEvent *he = static_cast<QHelpEvent *>(event);
         if (!m_historyBuilder.m_energyBarTooltip.isEmpty())
