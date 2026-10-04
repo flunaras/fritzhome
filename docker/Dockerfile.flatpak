@@ -1,0 +1,51 @@
+# Build image for fritzhome's Flatpak bundle.
+#
+# Unlike the other docker/Dockerfile.* images (which build native RPM/DEB
+# packages directly), this image contains flatpak + flatpak-builder plus the
+# KDE 6.11 Platform/Sdk runtimes pre-installed from Flathub at image-build
+# time. This means:
+#   - No packages need to be installed on the build host — only Docker.
+#   - The (large, ~1-2 GB) KDE runtime download happens once, when this
+#     Docker image is built/rebuilt, and is cached as a Docker layer.
+#
+# IMPORTANT — bubblewrap sandboxing inside Docker:
+# flatpak-builder uses bubblewrap (bwrap) to create an unprivileged user +
+# mount namespace sandbox for each module build. Docker's default seccomp
+# profile blocks the namespace syscalls bwrap needs. This has been verified
+# to work with the following `docker run` flags (no `--privileged` required):
+#
+#   docker run --rm \
+#     --cap-add=SYS_ADMIN \
+#     --security-opt seccomp=unconfined \
+#     --security-opt apparmor=unconfined \
+#     ...
+#
+# These flags are applied automatically by
+# `docker/build.sh --distro flatpak-x86_64`.
+
+FROM debian:bookworm-slim
+
+LABEL org.opencontainers.image.title="fritzhome-builder-flatpak"
+LABEL org.opencontainers.image.description="Containerized build environment for the fritzhome Flatpak bundle (KDE 6.11 runtime pre-installed)"
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update -qq && apt-get install -y --no-install-recommends \
+        flatpak \
+        flatpak-builder \
+        bubblewrap \
+        ca-certificates \
+        elfutils \
+        git \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Pre-install the KDE 6.11 runtime + SDK from Flathub ───────────────────────
+# Installed system-wide (--system, the default for root) so it lives under
+# /var/lib/flatpak inside this image layer — no per-user install step and no
+# network access needed at container-run time.
+RUN flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo && \
+    flatpak install -y --noninteractive flathub \
+        org.kde.Platform//6.11 \
+        org.kde.Sdk//6.11
+
+WORKDIR /src

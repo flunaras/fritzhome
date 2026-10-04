@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# build.sh — Build fritzhome inside a Docker container for openSUSE Leap / Ubuntu.
+# build.sh — Build fritzhome inside a Docker container for openSUSE Leap /
+# Ubuntu / Flatpak.
 #
 # Usage:
 #   ./docker/build.sh [--distro <alias>|all] [--build-type Release|Debug]
@@ -10,9 +11,11 @@
 #   opensuse-tumbleweed-x86_64   openSUSE Tumbleweed, x86_64,  Qt6 + KF6
 #   opensuse-tumbleweed-aarch64  openSUSE Tumbleweed, aarch64, Qt6 + KF6 (cross-compiled)
 #   ubuntu-24.04-x86_64          Ubuntu 24.04,         x86_64,  Qt6-only
+#   flatpak-x86_64               Flatpak bundle,       x86_64,  Qt6 + KF6 (org.kde.Platform//6.11)
 #   all                          Build all of the above (default)
 #
-# Build type options (default: Release):
+# Build type options (default: Release; ignored for flatpak-x86_64, which
+# always builds Release — see flatpak/io.github.flunaras.fritzhome.yml):
 #   Release                      Optimized build. Suitable for deployment.
 #   Debug                        Debug symbols, qDebug output enabled. For debugging and development.
 #
@@ -20,17 +23,43 @@
 #   1. Builds (or reuses) a Docker image from docker/Dockerfile.<dockerfile-name>
 #   2. Runs cmake + ninja + cpack inside the container as the current host user
 #      (--user $(id -u):$(id -g)) so output files are owned by you
+#      (flatpak-x86_64 is the one exception — see below)
 #   3. Copies the resulting binary and package into a hierarchical directory tree:
 #
 #        build/<family>/<distro>/<arch>/   ← cmake / ninja / cpack work tree
 #        out/<family>/<distro>/<arch>/     ← final binary and package
 #
-#      where <family> is "opensuse" or "ubuntu", <distro> is the short distro name
-#      (e.g. "leap15.6", "tumbleweed", "24.04"), and <arch> is "x86_64" or "aarch64"
-#      for openSUSE targets, and "amd64" or "arm64" for Ubuntu targets.
+#      where <family> is "opensuse", "ubuntu", or "flatpak"; <distro> is the
+#      short distro name (e.g. "leap15.6", "tumbleweed", "24.04"); and <arch>
+#      is "x86_64"/"aarch64" for openSUSE and flatpak targets, and
+#      "amd64"/"arm64" for Ubuntu targets.
 #      Package filenames follow distribution standards:
 #        RPM (openSUSE):  fritzhome-<version>-<release>.<arch>.rpm
 #        DEB (Ubuntu):    fritzhome_<version>-<release>_<deb_arch>.deb
+#        Flatpak:         io.github.flunaras.fritzhome.flatpak
+#
+# ── flatpak-x86_64 specifics ──────────────────────────────────────────────────
+# This target builds a Flatpak bundle instead of a native RPM/DEB package —
+# the recommended distribution path for immutable-OS targets (e.g.
+# SteamOS/Holo) where RPM/DEB installs don't persist across OS image updates.
+# It needs ONLY Docker on the build host: docker/Dockerfile.flatpak bakes in
+# flatpak + flatpak-builder + the KDE 6.11 Platform/Sdk runtime (pre-installed
+# from Flathub at image-build time, ~1.7 GB, cached as a Docker layer).
+#
+# flatpak-builder uses bubblewrap (bwrap) internally to sandbox each module's
+# build in its own user/mount/network namespace. This has been verified to
+# work inside plain Docker (no --privileged needed) with:
+#   --cap-add=SYS_ADMIN --cap-add=NET_ADMIN
+#   --security-opt seccomp=unconfined --security-opt apparmor=unconfined
+#
+# Unlike the native targets, this container runs as root (bwrap needs to
+# manage its own internal uid/gid mapping), so files written to
+# build/flatpak/x86_64/ and build/flatpak/repo/ are briefly root-owned on
+# the host; the script chowns them back to the invoking user as its last step.
+# Also, the Docker image build does NOT use --pull (unlike the native
+# targets) — the KDE runtime version is explicitly pinned in the manifest, so
+# there's no "stale rolling-release Qt" problem to guard against, and
+# --pull would force a full ~1.7 GB re-download on every run.
 
 set -euo pipefail
 
@@ -79,12 +108,13 @@ case "$DISTRO" in
     opensuse-tumbleweed-x86_64|\
     opensuse-tumbleweed-aarch64|\
     ubuntu-24.04-x86_64|\
+    flatpak-x86_64|\
     all) ;;
     *)
         echo "ERROR: --distro must be one of:" >&2
         echo "  opensuse-leap-15.6-x86_64, opensuse-leap-16.0-x86_64," >&2
         echo "  opensuse-tumbleweed-x86_64, opensuse-tumbleweed-aarch64," >&2
-        echo "  ubuntu-24.04-x86_64, all" >&2
+        echo "  ubuntu-24.04-x86_64, flatpak-x86_64, all" >&2
         exit 1
         ;;
 esac
@@ -158,6 +188,80 @@ deb_arch_for_arch() {
         aarch64) echo "arm64"  ;;
         *)       echo "$1"     ;;
     esac
+}
+
+# ── Flatpak build function ────────────────────────────────────────────────────
+# Builds the Flatpak bundle for io.github.flunaras.fritzhome. Structurally
+# different enough from build_for_distro() (flatpak-builder + bwrap sandbox
+# flags instead of cmake/ninja/cpack + --user) to warrant its own function,
+# rather than threading a dozen `if [[ "$distro" == flatpak-* ]]` branches
+# through the native-package logic below.
+build_flatpak() {
+    local image="fritzhome-builder-flatpak"
+    local dockerfile="${SCRIPT_DIR}/Dockerfile.flatpak"
+    local app_id="io.github.flunaras.fritzhome"
+    local manifest="flatpak/${app_id}.yml"
+    local build_dir="${PROJECT_ROOT}/build/flatpak/x86_64"
+    local repo_dir="${PROJECT_ROOT}/build/flatpak/repo"
+    local out_dir="${PROJECT_ROOT}/out/flatpak/x86_64"
+    local bundle_path="${out_dir}/${app_id}.flatpak"
+
+    echo ""
+    echo "════════════════════════════════════════════════════════════"
+    echo "  Building for: flatpak-x86_64"
+    echo "════════════════════════════════════════════════════════════"
+
+    # ── Step 1: Build (or update) the Docker image ────────────────────────────
+    # No --pull here (unlike build_for_distro): the KDE runtime version is
+    # explicitly pinned (org.kde.Sdk//6.11) in the manifest, so there's no
+    # rolling-release staleness to guard against, and --pull would force a
+    # full ~1.7 GB re-download of the KDE runtime on every invocation.
+    echo ""
+    echo "[1/3] Building Docker image '${image}' (bakes in KDE 6.11 Platform/Sdk — first build downloads ~1.7 GB) ..."
+    docker build \
+        --file "${dockerfile}" \
+        --tag  "${image}" \
+        "${PROJECT_ROOT}"
+    echo "      Docker image ready."
+
+    # ── Step 2: Run flatpak-builder inside the container ──────────────────────
+    echo ""
+    echo "[2/3] Running flatpak-builder inside container ..."
+    rm -rf "${build_dir}" "${repo_dir}"
+    mkdir -p "${build_dir}" "${repo_dir}"
+
+    # NOTE: runs as container root (not --user $(id -u):$(id -g) like
+    # build_for_distro) because flatpak-builder's bwrap sandbox needs to
+    # create its own internal uid/gid mapping; files written to the
+    # bind-mounted source tree are owned by root on the host as a result.
+    # Step 4 below chowns everything back to the invoking user.
+    docker run --rm \
+        --cap-add=SYS_ADMIN \
+        --cap-add=NET_ADMIN \
+        --security-opt seccomp=unconfined \
+        --security-opt apparmor=unconfined \
+        -v "${PROJECT_ROOT}:/src" \
+        -w /src \
+        "${image}" \
+        flatpak-builder --force-clean --disable-rofiles-fuse \
+            --repo="/src/build/flatpak/repo" \
+            "/src/build/flatpak/x86_64" \
+            "${manifest}"
+
+    # ── Step 3: Export the single-file bundle ─────────────────────────────────
+    echo ""
+    echo "[3/3] Creating single-file bundle in out/flatpak/x86_64/ ..."
+    mkdir -p "${out_dir}"
+    docker run --rm \
+        -v "${PROJECT_ROOT}:/src" \
+        -w /src \
+        "${image}" \
+        flatpak build-bundle "/src/build/flatpak/repo" "/src/out/flatpak/x86_64/${app_id}.flatpak" "${app_id}"
+
+    # Hand ownership of anything root wrote back to the invoking user.
+    docker run --rm -v "${PROJECT_ROOT}:/src" alpine chown -R "$(id -u):$(id -g)" /src >/dev/null
+
+    echo "      Bundle : ${bundle_path}"
 }
 
 # ── Build function ────────────────────────────────────────────────────────────
@@ -319,6 +423,9 @@ if [[ "$DISTRO" == "all" ]]; then
     build_for_distro "opensuse-tumbleweed-x86_64"
     build_for_distro "opensuse-tumbleweed-aarch64"
     build_for_distro "ubuntu-24.04-x86_64"
+    build_flatpak
+elif [[ "$DISTRO" == "flatpak-x86_64" ]]; then
+    build_flatpak
 else
     build_for_distro "$DISTRO"
 fi

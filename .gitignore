@@ -8,6 +8,7 @@ CPackConfig.cmake
 CPackSourceConfig.cmake
 install_manifest.txt
 _CPack_Packages/
+.flatpak-builder
 
 # ── Build output (binaries + packages) ────────────────────────────────────────
 out/
@@ -33,6 +34,11 @@ ui_*.h
 *.tar.gz
 *.tar.bz2
 *.zip
+
+# ── Flatpak build state ───────────────────────────────────────────────────────
+flatpak/repo/
+*.flatpak
+!docker/Dockerfile.flatpak
 
 # ── Editor / IDE ──────────────────────────────────────────────────────────────
 .vscode/

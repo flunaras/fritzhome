@@ -64,6 +64,71 @@ Package filenames follow distribution conventions:
 
 The directory path encodes the distro family, release, and architecture.
 
+### Flatpak Build (alternate packaging path)
+
+In addition to the Docker/CPack pipeline above, `flatpak/` provides a
+Flatpak manifest (`io.github.flunaras.fritzhome.yml`) targeting the
+`org.kde.Platform`/`org.kde.Sdk` 6.11 runtime (Qt6 + KF6, same as the
+Tumbleweed/Leap 16.0 profile). This is the recommended distribution path for
+immutable-OS targets (e.g. SteamOS/Holo) where RPM/DEB installs don't persist
+across OS image updates.
+
+**Two ways to build it:**
+
+1. **Fully containerized (`docker/build.sh --distro flatpak-x86_64`) —
+   recommended.** flatpak-builder uses bubblewrap (bwrap) internally to
+   sandbox each module's build in its own user/mount/network namespace.
+   This has been verified to work inside plain Docker (no `--privileged`
+   needed) with: `--cap-add=SYS_ADMIN --cap-add=NET_ADMIN
+   --security-opt seccomp=unconfined --security-opt apparmor=unconfined`.
+   `docker/Dockerfile.flatpak` bakes the KDE 6.11 Platform/Sdk runtime into
+   the image at build time (~1.7 GB, downloaded once, cached as a Docker
+   layer), so the **only host requirement is Docker itself** — matching the
+   same zero-host-dependency model as the native RPM/DEB targets. This
+   target is also included in `--distro all`.
+
+   ```bash
+   ./docker/build.sh --distro flatpak-x86_64
+   # → out/flatpak/x86_64/io.github.flunaras.fritzhome.flatpak
+   ```
+
+   Note: flatpak-builder runs as container root (bwrap needs to manage its
+   own internal uid/gid mapping), unlike the `--user $(id -u):$(id -g))`
+   native targets — so files written to `build/flatpak/` during the build
+   are briefly root-owned on the host; the script chowns them back to the
+   invoking user as its last step.
+
+2. **Directly on the host (`flatpak/build.sh`).** Needs `flatpak` +
+   `flatpak-builder` plus the KDE runtime/SDK installed once from Flathub.
+   Useful if you don't want to pull in a ~1.7 GB Docker image, or are
+   iterating locally and want faster incremental rebuilds (flatpak-builder's
+   own build cache persists naturally in `~/.cache`/`.flatpak-builder`
+   without Docker layer invalidation concerns).
+
+   ```bash
+   # One-time host setup
+   flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+   flatpak install -y flathub org.kde.Sdk//6.11 org.kde.Platform//6.11
+
+   # Build a single-file, offline-installable bundle
+   ./flatpak/build.sh
+   # → out/flatpak/x86_64/io.github.flunaras.fritzhome.flatpak
+
+   # Or build + install directly into the local user installation in one step
+   ./flatpak/build.sh --install
+   ```
+
+Either way, install the resulting bundle locally with:
+
+```bash
+flatpak install ./out/flatpak/x86_64/io.github.flunaras.fritzhome.flatpak
+```
+
+No publishing infrastructure (Flathub account, GPG-signed repo, etc.) is
+required for local use or for attaching the `.flatpak` bundle to a GitHub
+Release — it is self-contained once the KDE runtime is present on the
+target machine.
+
 ### Key `USE_KF` Values
 
 | Value | Qt | KDE Frameworks | Password Backend | Use Case |

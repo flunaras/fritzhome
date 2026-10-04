@@ -1,0 +1,68 @@
+id: io.github.flunaras.fritzhome
+runtime: org.kde.Platform
+runtime-version: '6.11'
+sdk: org.kde.Sdk
+command: fritzhome
+
+# The org.kde.Sdk runtime does not ship a gdk-pixbuf SVG loader (only
+# librsvg itself, used directly by Qt's own QSvg module). flatpak-builder's
+# export step validates every icon by loading it through gdk-pixbuf, so the
+# installed share/icons/.../fritzhome.svg fails export with "Format not
+# recognized" even though it's a perfectly valid SVG. Work around this by
+# removing the SVG from the installed tree and rendering PNG icons instead
+# (via rsvg-convert, which IS present in org.kde.Sdk) — PNG needs no special
+# gdk-pixbuf loader. rename-icon is NOT used here since there's no SVG left
+# to rename; the desktop file's Icon= key is fixed up manually instead.
+appstream-compose: false
+
+# ── Sandbox permissions ───────────────────────────────────────────────────────
+# - Network access: required to talk to the Fritz!Box over the local LAN
+#   (no internet access is actually used, but Flatpak only has a coarse
+#   "network" switch — there is no "LAN-only" permission).
+# - Secrets portal + KWallet D-Bus name: password storage backend
+#   (secretstore.cpp talks to KWallet directly when HAVE_KF=1; the portal
+#   name below lets that D-Bus call reach the host KWallet daemon from
+#   inside the sandbox).
+# - host-os /etc/hosts + /etc/resolv.conf via --filesystem: not needed;
+#   Flatpak's shared network namespace already provides DNS resolution.
+finish-args:
+  - --share=network
+  - --share=ipc
+  - --socket=fallback-x11
+  - --socket=wayland
+  - --device=dri
+  - --talk-name=org.kde.kwalletd5
+  - --talk-name=org.kde.kwalletd6
+  - --talk-name=org.freedesktop.secrets
+
+modules:
+  - name: fritzhome
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DUSE_KF=6
+    post-install:
+      # See the appstream-compose/icon comment above: replace the installed
+      # scalable SVG icon (unexportable without a gdk-pixbuf SVG loader)
+      # with rasterized PNGs at standard hicolor sizes, named to match the
+      # app ID, and point the desktop file's Icon= key at the new name.
+      - rm -rf ${FLATPAK_DEST}/share/icons/hicolor/scalable
+      - |
+        for size in 16 32 48 64 128 256; do
+          mkdir -p ${FLATPAK_DEST}/share/icons/hicolor/${size}x${size}/apps
+          rsvg-convert -w ${size} -h ${size} \
+            -o ${FLATPAK_DEST}/share/icons/hicolor/${size}x${size}/apps/io.github.flunaras.fritzhome.png \
+            data/fritzhome.svg
+        done
+      - sed -i 's/^Icon=fritzhome$/Icon=io.github.flunaras.fritzhome/' ${FLATPAK_DEST}/share/applications/io.github.flunaras.fritzhome.desktop
+    sources:
+      # Local directory source — copies the current working tree (relative to
+      # this manifest's directory) into the build sandbox. This is the
+      # recommended approach for CI / local builds (see Flatpak docs,
+      # "Directory source"). It is NOT suitable for a Flathub submission,
+      # where a pinned `type: git` source with a tag/commit is required
+      # instead. build/ and out/ are harmless if present (just copied and
+      # ignored by CMake's out-of-source build), but for a clean/fast build
+      # run `git clean -fdx -e flatpak` first.
+      - type: dir
+        path: ..
